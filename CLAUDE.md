@@ -72,6 +72,19 @@ NotebookLM ノートブック「レコルト　自動調理ポット」（id `27
 `index.html` を直接編集してよい（テンプレート＋seed.json から生成したが、成果物は単一ファイル）。
 アイコン（favicon / apple-touch-icon / icon-192 / icon-512）と manifest.webmanifest は同梱ずみ。
 
+アイコンの元画像は **デスクトップの `Firefly.png`**（Adobe Firefly 生成、1024×1024）。
+この PNG は透過に見えるが、**透明部分がチェッカー柄のうすいグレーとして焼きこまれている**ので、
+そのまま使うと格子模様がふちに出る。作り直すときは：
+
+1. 「明るくて彩度が低い」画素をチェッカーとみなす（`min>180 かつ max-min<22`）
+2. **四隅から flood fill** して、ふちから続いている部分だけを外側とする
+   （ポットの明るい金属部分を消さないため）。
+   PIL の `floodfill` は numpy 由来の画像だと `.copy()` しないと空振りし、
+   `thresh` を渡すと何も塗られない。**どちらも踏まないこと**
+3. 角丸四角に切りつめ、apple-touch-icon / icon-192 / icon-512 は
+   **不透明**にして角を地色 `#2b211b` でうめる（iOS・Android が自分で角を丸めるため）。
+   favicon だけ透過のまま
+
 ```
 git add -A && git commit -m "..." && git push
 ```
