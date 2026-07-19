@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ポット帳">
+<meta name="theme-color" content="#15120f">
+<title>レコルト 自動調理ポット レシピ帳</title>
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{
+  --bg:#15120f; --bg2:#1f1a16; --card:#261f1a; --line:#3b322b;
+  --ink:#f4efe8; --sub:#a89a8d; --red:#c96a4b; --red2:#e58a67;
+  --gold:#e5b25d; --blue:#7fb3a3;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  /* タイマーバーの高さ。出ている間だけ JS が実測値を入れる。
+     画面下に固定しているものは、この分だけ上に逃がす */
+  --timerh: 0px;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  font-size:16px; line-height:1.6;
+  -webkit-text-size-adjust:100%;
+  padding-bottom:calc(96px + var(--safe-b) + var(--timerh));
+}
+button,input,select,textarea{font-family:inherit; font-size:16px;}
+button{cursor:pointer;}
+
+header{
+  position:sticky; top:0; z-index:30;
+  padding:calc(10px + var(--safe-t)) 14px 10px;
+  background:linear-gradient(180deg,#1f1a16 60%,rgba(31,26,22,.92));
+  border-bottom:1px solid var(--line);
+  backdrop-filter:saturate(1.4) blur(10px);
+}
+.brand{display:flex; align-items:center; gap:10px;}
+.brand .mark{
+  width:36px;height:36px;border-radius:10px;flex:none;
+  object-fit:cover; background:var(--card);
+  box-shadow:0 2px 10px rgba(0,0,0,.35);
+}
+.brand h1{margin:0; font-size:17px; letter-spacing:.02em;}
+.brand small{display:block; font-size:11px; color:var(--sub); font-weight:400; letter-spacing:.04em;}
+.tools{margin-left:auto; display:flex; gap:8px;}
+.icobtn{
+  width:38px;height:38px;border-radius:11px;border:1px solid var(--line);
+  background:var(--card); color:var(--ink); font-size:17px; display:grid;place-items:center;
+}
+.searchrow{display:flex; gap:8px; margin-top:10px;}
+.search{
+  flex:1; display:flex; align-items:center; gap:8px;
+  background:var(--card); border:1px solid var(--line); border-radius:12px; padding:0 12px;
+}
+.search input{flex:1; background:none; border:0; color:var(--ink); padding:11px 0; outline:none;}
+.chips{display:flex; gap:7px; overflow-x:auto; margin-top:10px; padding-bottom:2px; scrollbar-width:none;}
+.chips::-webkit-scrollbar{display:none;}
+.chip{
+  flex:none; padding:7px 14px; border-radius:999px; font-size:13px;
+  border:1px solid var(--line); background:var(--card); color:var(--sub); white-space:nowrap;
+}
+.chip.on{background:var(--red); border-color:var(--red); color:#fff; font-weight:600;}
+
+main{padding:14px;}
+.grid{display:grid; grid-template-columns:1fr; gap:11px;}
+@media(min-width:640px){ .grid{grid-template-columns:1fr 1fr;} }
+@media(min-width:1000px){ .grid{grid-template-columns:1fr 1fr 1fr;} }
+.card{
+  background:var(--card); border:1px solid var(--line); border-radius:15px;
+  padding:13px 14px; display:flex; gap:12px; align-items:flex-start; text-align:left;
+  width:100%; color:inherit; transition:transform .08s;
+}
+.card:active{transform:scale(.985);}
+.card .emoji{font-size:30px; line-height:1.2; flex:none; width:38px; text-align:center;}
+.card .thumb{
+  width:54px; height:54px; flex:none; border-radius:10px; object-fit:cover;
+  background:var(--bg2); border:1px solid var(--line);
+}
+.card .body{flex:1; min-width:0;}
+.card h3{margin:0 0 4px; font-size:16px; font-weight:700;}
+.card .meta{font-size:12.5px; color:var(--sub); display:flex; flex-wrap:wrap; gap:5px 9px; align-items:center;}
+.card .fav{font-size:17px; color:var(--gold); flex:none;}
+.tag{
+  display:inline-block; font-size:11px; padding:2px 8px; border-radius:6px;
+  background:rgba(201,106,75,.2); color:var(--red2); font-weight:600; letter-spacing:.03em;
+}
+.pot{display:inline-block; font-size:11px; padding:2px 8px; border-radius:6px; font-weight:600;
+  background:rgba(229,178,93,.15); color:var(--gold);}
+.empty{text-align:center; color:var(--sub); padding:60px 20px; font-size:14px;}
+
+/* シートは transform でスライドさせている。
+   transform のかかった要素の中では position:fixed が効かず、
+   中身と一緒にスクロールしてしまう（＝下部ボタンが本文に重なる）。
+   そのため中の固定物は position:sticky で作ること。
+   タイマーが出ている間はシートの下端をその分だけ上げ、タイマーと重ならないようにする。 */
+.sheet{
+  position:fixed; left:0; right:0; top:0; bottom:var(--timerh);
+  z-index:50; background:var(--bg);
+  overflow-y:auto; -webkit-overflow-scrolling:touch;
+  display:flex; flex-direction:column;
+  transform:translateY(100%); transition:transform .26s cubic-bezier(.3,.8,.4,1);
+}
+.sheet.open{transform:translateY(0);}
+.sheethead{
+  position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px;
+  padding:calc(10px + var(--safe-t)) 14px 10px;
+  background:rgba(31,26,22,.95); border-bottom:1px solid var(--line); backdrop-filter:blur(10px);
+}
+.sheethead .t{font-weight:700; font-size:16px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.sheetbody{padding:16px 16px 8px; flex:1 0 auto;}
+/* 下部ボタンのないシートは、自分で安全領域ぶんを空ける */
+#menu .sheetbody, #official .sheetbody{padding-bottom:calc(28px + var(--safe-b));}
+
+.hero{text-align:center; padding:14px 0 18px;}
+.hero .emoji{font-size:64px;}
+.hero h2{margin:6px 0 4px; font-size:23px;}
+.hero .cat{color:var(--sub); font-size:13px;}
+
+/* できあがり写真 */
+.shotwrap{position:relative; margin:0 0 10px;}
+.shot{
+  width:100%; max-height:260px; object-fit:cover; display:block;
+  border-radius:16px; border:1px solid var(--line); background:var(--bg2);
+}
+.shotwrap .zoom{
+  position:absolute; right:10px; bottom:10px;
+  background:#000a; color:#fff; border:0; border-radius:9px;
+  padding:6px 10px; font-size:12px; backdrop-filter:blur(4px);
+}
+.photobtn{
+  width:100%; padding:13px; border-radius:13px; font-size:14px; font-weight:600;
+  border:1px dashed var(--line); background:var(--bg2); color:var(--sub); margin-bottom:12px;
+}
+.photobtn.has{border-style:solid; padding:11px; font-size:13px;}
+.photobtn.link{border-style:solid; border-color:rgba(229,178,93,.5); color:var(--gold); display:block; text-decoration:none; text-align:center;}
+/* 公式レシピ一覧 */
+.olink{
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:12px 13px; margin-bottom:8px; border-radius:12px;
+  background:var(--card); border:1px solid var(--line); color:var(--ink);
+  font-size:14.5px; text-decoration:none;
+}
+.olink:active{background:#302722;}
+.olink .go{margin-left:auto; color:var(--sub); font-size:12px; flex:none;}
+#lightbox{
+  position:fixed; inset:0; z-index:90; background:#000e; display:none;
+  align-items:center; justify-content:center; padding:12px;
+}
+#lightbox.on{display:flex;}
+#lightbox img{max-width:100%; max-height:100%; object-fit:contain; border-radius:10px;}
+#lightbox .close{
+  position:absolute; top:calc(14px + var(--safe-t)); right:14px;
+  width:40px;height:40px;border-radius:50%; border:0; background:#fff2; color:#fff; font-size:18px;
+}
+
+.specs{display:grid; grid-template-columns:1.45fr 1fr 1fr; gap:9px; margin-bottom:12px;}
+.spec{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:11px 6px; text-align:center;}
+.spec .l{font-size:10.5px; color:var(--sub); letter-spacing:.08em;}
+.spec .v{font-size:19px; font-weight:700; margin-top:2px;}
+.spec .v small{font-size:11px; font-weight:400; color:var(--sub);}
+.spec.mode .v{font-size:12px; color:var(--red2); line-height:1.35; letter-spacing:-.03em; white-space:nowrap;}
+.ordernote{
+  background:var(--bg2); border:1px solid var(--line); border-left:3px solid var(--gold);
+  border-radius:10px; padding:10px 13px; font-size:13px; color:var(--sub); margin-bottom:6px;
+}
+.warn{
+  background:rgba(201,106,75,.12); border:1px solid rgba(201,106,75,.45); color:var(--red2);
+  border-radius:10px; padding:10px 13px; font-size:12.5px; margin:0 0 12px; line-height:1.75;
+}
+
+h4.sec{
+  font-size:13px; color:var(--gold); letter-spacing:.1em; margin:22px 0 10px;
+  border-left:3px solid var(--gold); padding-left:9px;
+}
+.servrow{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
+.servrow .lbl{font-size:13px; color:var(--sub);}
+.stepper{display:flex; align-items:center; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--card);}
+.stepper button{width:36px; height:34px; background:none; border:0; color:var(--ink); font-size:18px;}
+.stepper span{min-width:52px; text-align:center; font-size:14px; font-weight:600;}
+/* 材料は「入れる順番」でもあるので、番号を振って見せる */
+ul.ing{list-style:none; margin:0; padding:0; counter-reset:ig;}
+ul.ing li{
+  counter-increment:ig; display:flex; gap:10px; align-items:baseline;
+  padding:9px 2px 9px 30px; border-bottom:1px dashed var(--line); font-size:15px; position:relative;
+}
+ul.ing li::before{
+  content:counter(ig); position:absolute; left:0; top:10px;
+  width:21px;height:21px;border-radius:50%; background:var(--bg2); border:1px solid var(--line);
+  color:var(--sub); font-size:11px; display:grid; place-items:center;
+}
+ul.ing li .n{flex:1;}
+ul.ing li .a{color:var(--gold); font-weight:600; white-space:nowrap;}
+ol.steps{margin:0; padding:0; list-style:none; counter-reset:s;}
+ol.steps li{counter-increment:s; position:relative; padding:0 0 16px 38px; font-size:15px;}
+ol.steps li::before{
+  content:counter(s); position:absolute; left:0; top:1px;
+  width:25px;height:25px;border-radius:50%; background:var(--red); color:#fff;
+  font-size:13px; font-weight:700; display:grid; place-items:center;
+}
+.memo{background:var(--bg2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; font-size:14px; color:var(--sub); white-space:pre-wrap;}
+.src{font-size:11px; color:#867a70; margin-top:14px;}
+
+.actionbar{
+  position:sticky; bottom:0; z-index:55; margin-top:auto;
+  display:flex; gap:10px; padding:14px 14px calc(12px + var(--safe-b));
+  background:linear-gradient(180deg,rgba(21,18,15,0) 0%,var(--bg) 40%);
+}
+/* タイマーが下にいるときは、そちらが安全領域を持つので二重に空けない */
+body.timing .actionbar{ padding-bottom:12px; }
+.btn{
+  flex:1; padding:14px; border-radius:13px; border:1px solid var(--line);
+  background:var(--card); color:var(--ink); font-size:15px; font-weight:600;
+}
+.btn.pri{background:var(--red); border-color:var(--red); color:#fff;}
+.btn.pri:active{background:#a9553a;}
+.btn.ghost{flex:none; width:52px;}
+.btn.danger{color:var(--red2);}
+
+label.f{display:block; margin-bottom:14px;}
+label.f .l{font-size:12.5px; color:var(--sub); display:block; margin-bottom:5px; letter-spacing:.04em;}
+input.i, select.i, textarea.i{
+  width:100%; background:var(--card); border:1px solid var(--line); color:var(--ink);
+  border-radius:11px; padding:12px; outline:none;
+}
+input.i:focus, select.i:focus, textarea.i:focus{border-color:var(--red);}
+textarea.i{min-height:120px; resize:vertical; line-height:1.7;}
+.row3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:9px;}
+.hint{font-size:11.5px; color:var(--sub); margin:-9px 0 14px;}
+.emojipick{display:flex; flex-wrap:wrap; gap:7px;}
+.emojipick button{width:44px;height:44px;font-size:22px;border-radius:11px;border:1px solid var(--line); background:var(--card);}
+.emojipick button.on{border-color:var(--red); background:rgba(201,106,75,.2);}
+
+/* モード早見表 */
+.modelist{display:grid; gap:9px; margin-bottom:6px;}
+.modecard{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:12px 14px;}
+.modecard .mn{font-weight:700; color:var(--red2); font-size:14px; letter-spacing:.02em;}
+.modecard .md{font-size:13px; color:var(--sub); margin-top:3px; line-height:1.75;}
+.modecard .mt{font-size:11.5px; color:var(--gold); margin-top:4px;}
+
+#timerBar{
+  position:fixed; left:0; right:0; bottom:0; z-index:60;
+  padding:11px 14px calc(11px + var(--safe-b));
+  background:#2c1a12; border-top:1px solid var(--red);
+  display:none; align-items:center; gap:12px;
+}
+#timerBar.on{display:flex;}
+#timerBar.ring{animation:flash .7s infinite;}
+@keyframes flash{50%{background:var(--red);}}
+#timerBar .tt{font-size:12px; color:#f0d3c4; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#timerBar .num{font-size:29px; font-weight:700; font-variant-numeric:tabular-nums;}
+#timerBar button{
+  border:1px solid rgba(255,255,255,.28); background:rgba(255,255,255,.09);
+  color:#fff; border-radius:10px; padding:9px 13px; font-size:13px; font-weight:600;
+}
+.toast{
+  position:fixed; left:50%; bottom:calc(110px + var(--safe-b) + var(--timerh)); transform:translateX(-50%);
+  background:#000d; border:1px solid var(--line); color:#fff; padding:11px 18px;
+  border-radius:999px; font-size:14px; z-index:100; opacity:0; pointer-events:none;
+  transition:opacity .2s; white-space:nowrap;
+}
+.toast.on{opacity:1;}
+.banner{
+  background:rgba(229,178,93,.12); border:1px solid rgba(229,178,93,.4); color:var(--gold);
+  border-radius:12px; padding:11px 13px; font-size:12.5px; margin-bottom:13px; display:flex; gap:9px;
+}
+.banner button{background:none;border:0;color:var(--gold);font-size:17px;padding:0;}
+.fab{
+  position:fixed; right:16px; bottom:calc(18px + var(--safe-b) + var(--timerh)); z-index:40;
+  width:58px;height:58px;border-radius:50%; border:0; background:var(--red); color:#fff;
+  font-size:30px; box-shadow:0 6px 22px rgba(201,106,75,.45);
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <img class="mark" src="apple-touch-icon.png" alt="">
+    <div>
+      <h1>自動調理ポット</h1>
+      <small>レコルト RSY-2 ｜ レシピ帳</small>
+    </div>
+    <div class="tools">
+      <button class="icobtn" id="btnOfficial" title="公式レシピ（写真つき）">📖</button>
+      <button class="icobtn" id="btnFav" title="お気に入りだけ">☆</button>
+      <button class="icobtn" id="btnMenu" title="メニュー">⋯</button>
+    </div>
+  </div>
+  <div class="searchrow">
+    <div class="search">
+      <span>🔍</span>
+      <input id="q" type="search" placeholder="レシピ名・材料でさがす" autocomplete="off">
+    </div>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main>
+  <div id="banner"></div>
+  <div class="grid" id="list"></div>
+  <div class="empty" id="empty" style="display:none">みつかりませんでした</div>
+</main>
+
+<button class="fab" id="btnAdd">＋</button>
+
+<div class="sheet" id="detail">
+  <div class="sheethead">
+    <button class="icobtn" onclick="closeSheet('detail')">✕</button>
+    <div class="t" id="dTitle"></div>
+    <button class="icobtn" id="dFav">☆</button>
+  </div>
+  <div class="sheetbody" id="dBody"></div>
+  <div class="actionbar" id="dActions"></div>
+</div>
+
+<div class="sheet" id="form">
+  <div class="sheethead">
+    <button class="icobtn" onclick="closeSheet('form')">✕</button>
+    <div class="t" id="fTitle">レシピを追加</div>
+  </div>
+  <div class="sheetbody">
+    <label class="f"><span class="l">レシピ名</span>
+      <input class="i" id="fName" placeholder="例：白菜と豚バラのミルクスープ"></label>
+
+    <label class="f"><span class="l">アイコン</span></label>
+    <div class="emojipick" id="fEmoji" style="margin:-8px 0 16px"></div>
+
+    <label class="f"><span class="l">カテゴリ</span>
+      <select class="i" id="fCat"></select></label>
+
+    <label class="f"><span class="l">モード</span>
+      <select class="i" id="fMode"></select></label>
+    <div class="hint" id="fModeHint"></div>
+
+    <div class="row3">
+      <label class="f"><span class="l">目安（分）</span>
+        <input class="i" id="fMin" type="number" inputmode="numeric" placeholder="30"></label>
+      <label class="f"><span class="l">本体</span>
+        <select class="i" id="fPot"><option>RSY-2</option><option>RSY-3</option></select></label>
+      <label class="f"><span class="l">何人分</span>
+        <input class="i" id="fServ" type="number" inputmode="numeric" placeholder="3"></label>
+    </div>
+    <div class="hint">時間はモードが自動で決めます。ここの数字はタイマー用の目安です。</div>
+
+    <label class="f"><span class="l">材料（入れる順に1行ずつ／「名前, 分量」）</span>
+      <textarea class="i" id="fIng" placeholder="牛乳, 300ml&#10;玉ねぎ（2〜3cm角に切る）, 50g&#10;かぼちゃ（2〜3cm角に切る）, 200g&#10;塩, 小さじ1/2"></textarea></label>
+    <div class="hint">上から順に、液体 → やわらかいもの → かたいもの・肉魚 → 氷 の順で書きます。</div>
+
+    <label class="f"><span class="l">作り方（1行に1手順）</span>
+      <textarea class="i" id="fStep" placeholder="材料を表記の上から順に入れる&#10;【SELECT】ボタンを押し、【POTAGE&amp;PASTE】モードを選ぶ"></textarea></label>
+
+    <label class="f"><span class="l">メモ（トッピング・コツ・失敗の記録）</span>
+      <textarea class="i" id="fMemo" style="min-height:80px" placeholder="牛乳が少ないと泡立つ。次は50ml増やす"></textarea></label>
+  </div>
+  <div class="actionbar">
+    <button class="btn" onclick="closeSheet('form')">やめる</button>
+    <button class="btn pri" id="fSave">保存する</button>
+  </div>
+</div>
+
+<div class="sheet" id="menu">
+  <div class="sheethead">
+    <button class="icobtn" onclick="closeSheet('menu')">✕</button>
+    <div class="t">メニュー</div>
+  </div>
+  <div class="sheetbody">
+    <h4 class="sec">5つのモード（RSY-2）</h4>
+    <div class="modelist" id="mModes"></div>
+    <p style="font-size:12px;color:var(--sub);line-height:1.8">
+      操作は【SELECT】ボタンを押してモードを選ぶだけ。時間は機械が決めるので、自分で設定するところはありません。
+      お知らせランプ1→2→3の順に、点滅から点灯に変わります。<br>
+      ※ 具材を入れ忘れたときは、<b style="color:var(--ink)">お知らせランプ2の点滅中（30秒以内）</b>ならフタを開けて足せます。
+    </p>
+
+    <h4 class="sec">材料を入れる順番</h4>
+    <div style="font-size:13.5px;line-height:1.85">
+      <p style="margin-top:0">かならず <b style="color:var(--gold)">液体からさきに</b> 入れます。刃が液体を巻きこんでうずを作り、
+        上のかたい食材を引きずり下ろして刻むためです。逆にすると刃が回らず、止まってしまうことがあります。</p>
+      <p style="margin:0">
+        ① 液体（水・牛乳・しょうゆなどの液体調味料）<br>
+        ② やわらかいもの（バナナ・玉ねぎなど）<br>
+        ③ かたいもの（にんじんなど）、肉・魚<br>
+        ④ 氷（家庭用製氷機のもの、2.5cm以下）
+      </p>
+      <p style="color:var(--sub);font-size:12.5px">
+        ※ 粉の調味料（砂糖・塩・こしょう）、すりおろしのしょうが・にんにくは、かたい食材のあとに入れます。<br>
+        ※ 材料は <b style="color:var(--ink)">2〜3cm角</b> に切り、芯や種は取りのぞきます。<br>
+        ※ 量は <b style="color:var(--ink)">300mlラインからMaxラインのあいだ</b>。生米は水のすぐあとに入れて、完全に水にしずめます。
+      </p>
+    </div>
+
+    <h4 class="sec">ふきこぼれを防ぐ</h4>
+    <div style="font-size:13.5px;line-height:1.85">
+      <p style="margin-top:0">牛乳・豆乳は加熱すると表面に膜ができ、その下で一気に泡が上がってふきこぼれます。</p>
+      <p style="margin:0">
+        ・牛乳や豆乳を<b style="color:var(--ink)">少量だけ</b>使うと泡立ちやすいので、レシピの分量どおりに。<br>
+        ・牛乳のかわりに豆乳を使うときは <b style="color:var(--gold)">豆乳2：水1</b> で薄めます。<br>
+        ・じゃがいも・里芋などでんぷんの多いものを入れすぎると、とろみが強くなって対流が止まり、
+          底が焦げて加熱が止まります。アレンジは公式の分量を目安に。
+      </p>
+    </div>
+
+    <h4 class="sec">使ったあとのお手入れ</h4>
+    <p style="font-size:13px;color:var(--sub);margin-top:0;line-height:1.85">
+      注ぎ終わったら<b style="color:var(--ink)">すぐ</b>に、水かぬるま湯を300mlライン（MIN）くらいまで入れて、
+      台所用中性洗剤を1〜2滴。フタをして <b style="color:var(--gold)">【JUICE&amp;CLEAN】モード（約3分）</b> で自動クリーニングします。<br>
+      そのあと電源コードを抜き、<b style="color:var(--ink)">プラグ挿入口カバーを閉じてから</b>水ですすぎ、よく乾かします。
+      本体の外側と電源コードは水洗いできません。刃の裏は付属のブラシで。
+    </p>
+    <p style="font-size:12.5px;color:var(--sub);line-height:1.8">
+      放置すると刃に残った調理物がこびりついて故障の原因になります。すぐ洗えないときは、水を入れておくだけでもかまいません。
+    </p>
+
+    <h4 class="sec">できあがりの写真</h4>
+    <p style="font-size:13px;color:var(--sub);margin-top:0;line-height:1.85">
+      上の <b style="color:var(--ink)">📖</b> ボタンから、レコルト公式サイトの写真つきレシピ <b style="color:var(--ink)" id="mCount"></b> 品をひらけます。
+      アプリの中のレシピにも <b style="color:var(--gold)">「📷 公式ページで写真を見る」</b> ボタンが出ます。<br>
+      公式の写真はこのアプリの中には取りこんでいません。よその写真を勝手に配ることはできず、画像のURLもいずれ切れてしまうためです。
+    </p>
+    <p style="font-size:13px;color:var(--sub);line-height:1.85">
+      自分で撮った写真は貼れます。レシピをひらいて <b style="color:var(--ink)">「📷 できあがりの写真をつける」</b> から、その場で撮るか写真アプリから選べます。
+      写真は自動で小さく（長辺900px）してから保存しますが、<b style="color:var(--ink)">入れられるのは20〜30枚くらい</b>が目安です。
+    </p>
+
+    <h4 class="sec">バックアップ</h4>
+    <p style="font-size:13px;color:var(--sub);margin-top:0">
+      レシピはこの端末のブラウザの中だけに保存されています。<b style="color:var(--ink)">機種変更やSafariのデータ削除で消えます。</b>
+      ときどき書き出してファイルに残してください。写真も一緒に書き出されます。
+    </p>
+    <button class="btn" style="width:100%;margin-bottom:10px" id="mExport">📤 ファイルに書き出す</button>
+    <button class="btn" style="width:100%;margin-bottom:24px" id="mImport">📥 ファイルから読み込む</button>
+    <input type="file" id="mFile" accept=".json,application/json" style="display:none">
+
+    <h4 class="sec">ホーム画面に追加</h4>
+    <p style="font-size:13px;color:var(--sub);margin-top:0">
+      Safari下の <b style="color:var(--ink)">共有ボタン → ホーム画面に追加</b>。
+      アプリのように開けて、しばらく使わなくてもレシピが消えにくくなります（iOSの仕様）。
+    </p>
+
+    <h4 class="sec">こまったとき</h4>
+    <button class="btn danger" style="width:100%;margin-bottom:10px" id="mReset">お手本レシピを入れ直す</button>
+    <p style="font-size:12px;color:var(--sub)">お手本レシピだけを追加し直します。自分で作ったレシピは消えません。</p>
+    <p style="font-size:11.5px;color:var(--sub);margin-top:30px;line-height:1.7">
+      ※ お手本レシピは、レコルト公式サイトのレシピをもとにしています。分量や仕上がりは食材によって変わります。<br>
+      ※ <b style="color:var(--ink)">ラージ</b> と書いてあるレシピは、容量約800mlの［自動調理ポット ラージ RSY-3］用です。
+      RSY-2（約600ml）で作るときは分量を 3/4 くらいに減らし、Maxラインを超えないようにしてください。<br>
+      ※ 材料を入れた状態で本体を傾けないこと。フタと本体のスイッチマーク（▼▲）が合っていないと運転しません。<br>
+      ※ おかゆの保温はおすすめされていません。
+    </p>
+  </div>
+</div>
+
+<div id="timerBar">
+  <div>
+    <div class="tt" id="tName"></div>
+    <div class="num" id="tNum">00:00</div>
+  </div>
+  <button id="tToggle">一時停止</button>
+  <button id="tStop">やめる</button>
+</div>
+
+<div class="sheet" id="official">
+  <div class="sheethead">
+    <button class="icobtn" onclick="closeSheet('official')">✕</button>
+    <div class="t">公式レシピ（写真つき）</div>
+  </div>
+  <div class="sheetbody">
+    <p style="font-size:12.5px;color:var(--sub);margin-top:0;line-height:1.8">
+      レコルト公式サイトの、自動調理ポットで作れるレシピ <b style="color:var(--ink)" id="oCount"></b> 品です。
+      タップすると公式ページがひらいて、<b style="color:var(--ink)">できあがりの写真</b>と作り方が見られます。
+    </p>
+    <div class="search" style="margin-bottom:12px">
+      <span>🔍</span>
+      <input id="oq" type="search" placeholder="料理名でさがす" autocomplete="off">
+    </div>
+    <div id="oList"></div>
+    <div style="height:24px"></div>
+  </div>
+</div>
+
+<div id="lightbox">
+  <button class="close" id="lbClose">✕</button>
+  <img id="lbImg" alt="">
+</div>
+<input type="file" id="pFile" accept="image/*" style="display:none">
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   レコルト 自動調理ポット レシピ帳（RSY-2 / RSY-3 ラージ）
+   ・温度も時間も設定できない機種。決めるのは「モード」だけ
+   ・材料は入れる順番そのものなので、番号を振って見せる
+   保存先：localStorage（この端末のみ）
+   ========================================================= */
+
+const KEY = 'recolte-pot-recipes-v1';
+const KEY_SEED = 'recolte-pot-seeded-v1';
+
+const CATS = ['ポタージュ','たべるスープ','カレー・シチュー','おかゆ・リゾット',
+              'ソース・たれ','豆乳・おから','スムージー','スイーツ','だし・その他'];
+
+/* RSY-2 のモード。時間は機械が決めるので、min はタイマー用の目安 */
+const MODES = {
+  'POTAGE&PASTE': {min:30, jp:'ポタージュ｜ペースト',
+    note:'材料を細かく刻み、高温で煮こみながら撹拌。最後は高速撹拌でなめらかに仕上げます。',
+    time:'約30分'},
+  'SOUP&OKAYU'  : {min:30, jp:'たべるスープ／おかゆ',
+    note:'1分間に1秒ほどの短い撹拌をくり返しながら高温で加熱。具材の形が残ります。生米からのおかゆもこれ。',
+    time:'約30分'},
+  'SOYMILK'     : {min:30, jp:'豆乳',
+    note:'乾燥大豆から豆乳とおからを作ります。高温で煮こみながら、低速と高速の撹拌をくり返します。',
+    time:'約30分'},
+  'JUICE&CLEAN' : {min:3,  jp:'ジュース｜CLEAN',
+    note:'加熱しない冷たいモード。撹拌と停止をくり返します。家庭用の氷も砕けます。お手入れにも使います。',
+    time:'約3分'},
+  'WARM'        : {min:22, jp:'保温',
+    note:'75℃前後をキープ。1分間に1秒ほどの撹拌で焦げつきをおさえながら温めます（20〜25分）。おかゆの保温は不向き。',
+    time:'20〜25分'}
+};
+
+const OFFICIAL_BASE = 'https://recolte-jp.com/recipe/';
+const EMOJIS = ['🥣','🍲','🍛','🍚','🥫','🫘','🥤','🍮','🎃','🌽','🥔','🥦','🥕','🍅','🍄','🧀','🍤','🐟','🥩','🍗','🥬','🍠','🍌','🍓','🍼'];
+
+/* ---------- お手本レシピ ----------
+   出典：レコルト公式サイト（recolte-jp.com）の自動調理ポット用レシピ。
+   NotebookLM ノートブック「レコルト　自動調理ポット」の資料もあわせて確認した。
+   写真は公式ページで見てもらう（link）。
+------------------------------------------------------------------ */
+const SEED = [
+{"name":"かつお節まるごとみそ汁","emoji":"🍜","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["水","300ml"],["かつお節","6g"],["昆布（なくてもOK）","1g"],["みそ","大さじ1"],["乾燥わかめ（水で戻して水気をきる）、油揚げ（拍子切り）",""]],"steps":["《具材》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、具材はお好みで。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58435/"},
+{"name":"きのこのごまポタージュ","emoji":"🍄","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["エリンギ（2～3cm角に切る）","100g"],["まいたけ（2～3cm角に切る）","100g"],["練りごま（白）","大さじ1"],["みそ","小さじ2"],["バター","5g"],["塩","小さじ1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：黒ごま","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41498/"},
+{"name":"じゃがいものポタージュ","emoji":"🥔","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","400ml"],["ねぎ（2～3cm幅に切る）","1/2本（40g）"],["じゃがいも（2～3cm角に切る）","1個（150g）"],["鶏がらスープの素（顆粒）","小さじ1と1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：フライドオニオン、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41730/"},
+{"name":"にんじんのソルトポタージュ","emoji":"🥕","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["にんじん（2～3cm角に切る）","1本（150g）"],["塩","小さじ1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：イタリアンパセリ（刻む）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41691/"},
+{"name":"にんじんのポタージュ","emoji":"🥕","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["にんじん（2～3cm角に切る）","300g"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：クルトン、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58399/"},
+{"name":"ふんわり かぶのポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","250ml"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["かぶ（皮をむき2〜3cm角に切る）","180g（2〜3個）"],["ハム","10g（1〜2枚）"],["おからパウダー","大さじ2"],["バター","10g"],["塩","小さじ1/2"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：黒こしょう…適量","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/45663/"},
+{"name":"ほうれん草のポタージュ","emoji":"🥦","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["玉ねぎ（2～3cm角に切る）","100g"],["冷凍ほうれん草（半解凍する）","150g"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：生クリーム、カリカリベーコン","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58415/"},
+{"name":"ほうれん草の梅ポタージュ","emoji":"🥦","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["ほうれん草（2〜3cm幅に切る）","2株（80g）"],["ねぎ（2cm幅に切る）","1本（60g）"],["梅干し（種を取る）","2個"],["鶏がらスープの素（顆粒）","小さじ1"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：黒ごま、梅肉","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23742/"},
+{"name":"まいたけのポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["玉ねぎ（2～3cm角に切る）","100g"],["まいたけ（手でほぐす）","100g"],["鶏がらスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：かつお節、すりごま","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58410/"},
+{"name":"アスパラのアンチョビペッパーポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["ねぎ（2～3cm角に切る）","1/2本（40g）"],["アスパラガス（2～3cm幅に切る）","3本（120g）"],["アンチョビ（フィレ）","3枚（9g）"],["コンソメスープの素（顆粒）","小さじ1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE＆PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：オリーブオイル、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/42049/"},
+{"name":"アスパラガスと豆乳のポタージュ","emoji":"🫘","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["調製豆乳","200ml"],["玉ねぎ（2〜3cm角に切る）","100g"],["冷凍アスパラガス（半解凍する、2〜3cm長さに切る）","200g"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：ピンクペッパー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/57200/"},
+{"name":"エビのビスク","emoji":"🍤","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","200ml"],["トマトの水煮（缶詰、ダイスカット）","1/2缶（200g）"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["桜エビ（乾燥）","30g"],["バター","20g"],["粉チーズ","小さじ2"],["塩","小さじ1/2"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23709/"},
+{"name":"オニオンチキンポタージュ","emoji":"🍗","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["水","200ml"],["しょうゆ","大さじ1"],["玉ねぎ（2〜3cm角に切る）","1個（200g）"],["鶏ももひき肉","100g"],["バター","20g"],["砂糖","小さじ1"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら中身をくり抜いたパンに注ぎ、トッピングはお好みで。"],"memo":"トッピング：ピザ用チーズ、黒こしょう（粗びき）、 パン（中身をくり抜けるパンならなんでもOK。 食パン1斤を使っても！）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23714/"},
+{"name":"カリフラワーのレモンポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["カリフラワー（小房に分けて3等分に切る）","250g"],["コンソメスープの素（顆粒）","小さじ1"],["塩","小さじ1/4"],["レモン果汁","大さじ1"]],"steps":["レモン果汁以外の材料を、材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 できあがったらレモン果汁を加える。 ＊器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：レモン（輪切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23718/"},
+{"name":"サーモンクリームポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["スモークサーモン（ざく切り）","150g"],["じゃがいも（2〜3cm角に切る）","1個（150g）"],["バター","10g"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ディル、黒こしょう（粗びき）、オリーブオイル","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23712/"},
+{"name":"ハニージンジャーキャロットポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["にんじん（2〜3cm角に切る）","大1本（200g）"],["しょうが（薄切り）","20g"],["バター","5g"],["塩","小さじ1/2"],["はちみつ","小さじ2"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23744/"},
+{"name":"パプリカの美肌ポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["調整豆乳","200ml"],["パプリカ（赤・2～3cm角に切る）","1個（150g）"],["セロリ（2～3cm角に切る）","1/3本（40g）"],["塩","小さじ1/2"],["レモン汁","小さじ1"],["オリーブオイル","適量"]],"steps":["レモン汁、オリーブオイル、トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったらレモン汁を加えて混ぜ、器に注ぐ。オリーブオイルを回しかける。 ＊トッピングはお好みで。"],"memo":"トッピング：レモン（スライス）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41479/"},
+{"name":"ブロッコリーのジンジャーポタージュ","emoji":"🥦","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["牛乳","300ml"],["ブロッコリー（小房に切る）","1/2株（120g）"],["しょうが ひとかけ","（10g）"],["コンソメスープの素（顆粒）","小さじ1"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：しょうが（せん切り）、オリーブオイル","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41727/"},
+{"name":"冷製アボカドポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["レモン汁","小さじ1"],["アボカド（2～3cm角に切る）","小1個（100g）"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["鶏がらスープの素（顆粒）","小さじ1"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。 ＊できあがったら器に注ぎ、〈トッピング〉はお好みで。"],"memo":"トッピング：イタリアンパセリ、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41463/"},
+{"name":"基本のかぼちゃのポタージュ","emoji":"🎃","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["かぼちゃ（皮・種・わたを取り、2〜3cm角に切る）","200g"],["バター","10g"],["塩","小さじ1/2"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：生クリーム、クルトン、パセリ（刻む）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23706/"},
+{"name":"基本のコーンポタージュ","emoji":"🌽","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["牛乳","200ml"],["コーン（缶詰またはパック）","200g"],["バター","10g"],["塩","小さじ1/2"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ピンクペッパー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23703/"},
+{"name":"新玉ねぎとかぶのポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["新玉ねぎ（2～3cm角に切る）","100g"],["かぶ（2～3cm角に切る）","200g"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：生ハム、粉チーズ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58424/"},
+{"name":"旬のとうもろこしで作るポタージュ","emoji":"🌽","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["とうもろこし（芯から実をそぎ取る）","1本（130g・正味）"],["バター","5g"],["塩","小さじ1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、〈トッピング〉はお好みで。"],"memo":"トッピング：パセリ（みじん切り）、クルトン","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41492/"},
+{"name":"春キャベツと桜エビの豆乳ポタージュ","emoji":"🫘","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["調整豆乳","300ml"],["キャベツ（2～3cm角に切る）","2～3枚（100g）"],["桜エビ（乾燥）","10g"],["にんにく（すりおろす）","小さじ1/4"],["塩","小さじ1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：桜エビ（乾燥）、粉チーズ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41481/"},
+{"name":"枝豆のヨーグルトポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["水","100ml"],["冷凍むき枝豆（半解凍する）","150g（正味）"],["ヨーグルト（無糖）","200g"],["コンソメスープの素（顆粒）","小さじ1"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：冷凍むき枝豆（解凍する）、ピンクペッパー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41494/"},
+{"name":"真っ赤なビーツのポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","200ml"],["ビーツ（水煮、2～3cm角に切る）","250g"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["コンソメスープの素（顆粒）","小さじ1"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：生クリーム、ディル、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41440/"},
+{"name":"3種類のきのこポタージュ","emoji":"🍄","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["牛乳","400ml"],["玉ねぎ（2〜3cm角に切る）","150g（小1個）"],["エリンギ（2〜3cm角に切る）","75g"],["マッシュルーム（半分に切る）","45g"],["しいたけ（2〜3cm幅に切る）","30g（2枚）"],["コンソメスープの素（顆粒）","大さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：マッシュルーム（スライス）、セルフィーユ、 オリーブオイル、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68386/"},
+{"name":"かぼちゃのポタージュ","emoji":"🎃","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["牛乳","450ml"],["玉ねぎ（2〜3cm角に切る）","50g"],["かぼちゃ（皮・種・わたを取り、2〜3cm角に切る）","300g"],["バター","15g"],["塩","小さじ1"],["牛乳","200ml"],["玉ねぎ（2〜3cm角に切る）","30g"],["かぼちゃ（皮・種・わたを取り、2〜3cm角に切る）","170g"],["バター","5g"],["塩","小さじ1/2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：生クリーム、クルトン","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68045/"},
+{"name":"なめらかコーンポタージュ","emoji":"🌽","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["牛乳","400ml"],["コーン（缶詰またはパック、汁を軽く切って使う）","400g"],["バター","20g"],["塩","小さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パセリ（刻む）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68119/"},
+{"name":"りんごとさつまいものポタージュ","emoji":"🍠","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":6,"ing":[["甘酒","200ml"],["牛乳","200ml"],["りんご（芯を取り、皮ごと2cm角に切る）","200g（1個）"],["さつまいも（皮をむき、2〜3cm角に切る）","200g（中1本）"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：さつまいも（角切りにして、ゆでる）、 メープルシロップ、シナモン","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68416/"},
+{"name":"れんこんの和風ポタージュ","emoji":"🥣","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["水","200ml"],["調整豆乳","400ml"],["れんこん（皮をむき、2〜3cm厚さのいちょう切り）","200g"],["和風だしの素（顆粒）","大さじ１"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：れんこんチップス、かつお節","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68448/"},
+{"name":"エビのビスク","emoji":"🍤","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["牛乳","350ml"],["トマトの水煮（缶詰、ダイスカット）","300g（3/4缶）"],["玉ねぎ（2~3cm角に切る）","75g（小1/2個）"],["桜エビ（乾燥）","45ｇ"],["バター","30g"],["粉チーズ","大さじ１"],["塩","小さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：タイム、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68382/"},
+{"name":"ビシソワーズ","emoji":"🥔","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["水","100ml"],["牛乳","400ml"],["玉ねぎ（2〜3cm角に切る）","50g（大1/4個）"],["じゃがいも（2〜3cm角に切る）","150g（1個）"],["コンソメスープの素（顆粒）","小さじ２"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：フライドオニオン、セルフィーユ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68369/"},
+{"name":"ブロッコリーのポタージュ","emoji":"🥦","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["牛乳","400ml"],["冷凍ブロッコリー（半解凍する）","400g"],["コンソメスープの素（顆粒）","大さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ピンクペッパー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68392/"},
+{"name":"本鶏だしのポタージュ","emoji":"🍗","cat":"ポタージュ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["S&B本鶏だし","1袋"],["牛乳","400ml"],["ねぎ（2〜3cm長さに切る）","50g"],["じゃがいも（2〜3cm角に切る）","150g"],["塩","小さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/79552/"},
+{"name":"きのこ入り酸辣湯（サンラータン）","emoji":"🍄","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["酢","大さじ1"],["しょうゆ","小さじ2"],["エリンギ（2～3cm角に切る）","1パック（100g）"],["しいたけ（薄切りにする）","2個"],["鶏ももひき肉","80g"],["にんにく（すりおろす）","小さじ1/2"],["塩","小さじ1/3"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パクチー、ごま油、ラー油","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41822/"},
+{"name":"たっぷり野菜の豚汁","emoji":"🥩","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","300ml"],["玉ねぎ（2～3cm角に切る）","1/6個（30g）"],["大根（2～3cm角に切る）","50g"],["にんじん（小さめの乱切り）","1/2本（75g）"],["豚ばら肉（薄切り、2cm幅に切る）","80g"],["みそ","大さじ1と1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ねぎ（小口切り）、七味唐辛子","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41733/"},
+{"name":"カニカマで作る中華スープ","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["玉ねぎ（2～3cm角に切る）","1/2個（100g）"],["カニカマ（手で割く）","8本（80g）"],["卵（割り入れる）","1個"],["オイスターソース、 鶏がらスープの素（顆粒）","各小さじ1"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：小ねぎ（小口切り）、ごま油","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41820/"},
+{"name":"キャベツの梅みそ汁","emoji":"🍜","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","300ml"],["キャベツ（2～3cm角に切る）","100g"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["梅干し（種を取る）","1個（15g）"],["かつお節","1パック（4g）"],["みそ","大さじ1と1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：麩（水で戻して、軽く絞る）、小ねぎ（小口切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41740/"},
+{"name":"タコのガリシア風スープ","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["じゃがいも（2～3cm角に切る）","1個（150g）"],["タコ（ボイル、2～3cmに切る）","80g"],["鶏がらスープの素（顆粒）","小さじ1と1/2"],["タバスコ","小さじ1/4"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パセリ（刻む）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41817/"},
+{"name":"ハヤシライス","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100m"],["トマト水煮（缶詰、ダイスカット）","300g"],["玉ねぎ（繊維を断つように薄切り）","150g"],["牛肉（焼き肉用・カルビ）","100g"],["バター","5g"],["トマトケチャップ","大さじ2"],["中濃ソース","大さじ2"],["ハヤシライスルー（市販品）","2人分（36g）"],["★塩、こしょう","各少々"],["★片栗粉","小さじ1"]],"steps":["牛肉は1cmの細切りにし、★をまぶす。","材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊器に刻んだパセリを混ぜた温かいごはん（分量外）を盛り、できあがったソースをかける。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58504/"},
+{"name":"ボルシチ","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","150ml"],["トマトの水煮（缶詰、ダイスカット）","200ml"],["ビーツ（水煮、2～3cm角に切る）","150g"],["にんじん（2～3cm角に切る）","1/3本（50g）"],["牛こま切れ肉（2～3cm幅に切る）","80g"],["コンソメスープの素（顆粒）","小さじ1と1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP＆OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ヨーグルト（無糖、水切り）、ディル","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/42044/"},
+{"name":"小松菜のミルクスープ","emoji":"🥦","cat":"たべるスープ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["水","300ml"],["PREMiL スキムコラーゲン","大さじ6（40g）"],["小松菜（1〜2cmに切る）","100g"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["鶏ガラスープの素","5g"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：クルトン…適量、エキストラバージンオリーブオイル…適量","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/45710/"},
+{"name":"豆腐としらすのわさびスープ","emoji":"🍢","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["絹豆腐（3連パックタイプ）","1パック（150g）"],["しらす干し","50g"],["かつお節","1/2パック（2g）"],["塩","小さじ1/2"],["わさび","小さじ1"]],"steps":["わさび、トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったらわさびを溶き、器に注ぐ。 ＊トッピングはお好みで。"],"memo":"トッピング：しらす、小ねぎ（斜め細切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41743/"},
+{"name":"豚ロースの塩麹スープ","emoji":"🥩","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["豚ロース肉（ブロック、2～3cm角に切る）","100g"],["塩麹","大さじ2"],["乾燥バジル（またはオレガノ）","小さじ1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ズッキーニ…1本（120g） ＊ダイスカットにして600Wの電子レンジで2分加熱する。","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41810/"},
+{"name":"韓国風春雨スープ","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["キムチ","70g"],["玉ねぎ（2～3cm角に切る）","50g"],["ねぎ（2～3cm幅に切る）","50g"],["豚ひき肉","50g"],["鶏がらスープの素（顆粒）","小さじ1/2"],["にんにく（すりおろす）","小さじ1/2"],["しょうが（すりおろす）","小さじ1/2"],["豆板醤","小さじ2"],["春雨（乾燥）","10g"]],"steps":["春雨と《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。","春雨をゆで、できあがったスープを注ぐ。 《トッピング》はお好みで。"],"memo":"トッピング：温泉卵、糸唐辛子、ラー油","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58430/"},
+{"name":"鮭とねぎの酒粕スープ","emoji":"🐟","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","400ml"],["ねぎ（2～3cm幅に切る）","1本（80g）"],["甘塩鮭（皮・骨を取り、ひとくち大に切る）","1切れ（80g）"],["かつお節","1パック（4g）"],["酒粕","大さじ2"],["みそ","大さじ1"],["塩","小さじ1/4"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41748/"},
+{"name":"かぶと鶏肉のあっさりスープ","emoji":"🥩","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","400ml"],["かぶ（6等分のくし切り）","200g（小2個）"],["かぶの葉（2〜3cm幅に切る）","20g"],["鶏もも肉（3〜4cm角に切る）","150g"],["しょうが（せん切り）","3g（1/2かけ分）"],["鶏がらスープの素（顆粒）","小さじ2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：三つ葉（刻む）、ゆずの皮（せん切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68698/"},
+{"name":"ごちそうブラウンスープ","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","100ml"],["デミグラスソース（市販品、缶詰）","290g（1缶）"],["玉ねぎ（2cm幅に切る）","100g（大1/2個）"],["セロリ（5mm幅の斜め薄切り）","20g"],["牛サーロイン肉（ステーキ用、3〜4cm角に切る）","200g ＊塩、こしょうをふり、よくもむ"],["みりん","大さじ2"],["トマトペースト、ウスターソース","各大さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。 ＊デミグラスソース缶を使わないときは、水100mlを300mlに増やし、ビーフシチュールー3人分（約54g）を加えてください。"],"memo":"トッピング：イタリアンパセリ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68671/"},
+{"name":"ごろごろ具材の豚汁","emoji":"🥩","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","450ml"],["玉ねぎ（2cm幅に切る）","50g（大1/4個）"],["だいこん（7mm〜1cm厚さのいちょう切り）","100g"],["にんじん（5〜7mm厚さの半月切り）","80g"],["豚バラ肉（焼肉用、2〜3cm幅に切る）","120g"],["みそ","大さじ2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ねぎ（小口切り）、一味唐辛子","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68664/"},
+{"name":"たっぷり野菜のコンソメスープ","emoji":"🥬","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","400ml"],["玉ねぎ（2cm幅に切る）","100g（大1/2個）"],["じゃがいも（2cm角に切る）","50g"],["キャベツ（3cmのざく切り）","100g"],["にんじん（5mm厚さの半月切り）","50g"],["ソーセージ（2cm幅に切る）","5本（90g）"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68676/"},
+{"name":"クラムチャウダー","emoji":"🦪","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["牛乳","400ml"],["玉ねぎ（2〜3cm角に切る）","200g（大1個）"],["じゃがいも（2cm角に切る）","60g（約1/3個）"],["冷凍アサリ（むき身、半解凍する）","70g"],["ベーコン（2cm幅に切る）","40g"],["マカロニ（9分ゆでタイプ）","20g"],["バター","5g"],["塩","小さじ1/2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パセリ（刻む）、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68424/"},
+{"name":"ハヤシライス","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","100ml"],["トマト水煮（缶詰・ダイスカット）","400g（1缶）"],["玉ねぎ（繊維を断つように薄切り）","150g（小1個）"],["牛カルビ肉（焼き肉用、1cmの細切り）","100g ＊塩、こしょうを少々ふり、片栗粉（小さじ1）をまぶす"],["バター","5g"],["トマトケチャップ、中濃ソース","各大さじ２"],["ハヤシライスルー（市販品）","3人分（約54ｇ）"],["温かいごはん","人数分"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊ごはんを盛り、できあがったソースをかける。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68451/"},
+{"name":"ベーコン香るミネストローネ","emoji":"🍅","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","400ml"],["トマトの水煮（缶詰、ダイスカット）","100g （1/4缶）"],["玉ねぎ（2〜3cm角に切る）","100g（大1/2個）"],["セロリ（2〜3cm角に切る）","40g"],["赤パプリカ、にんじん（共に2〜3cm角に切る）","各50g"],["押し麦","大さじ2（20g）"],["ベーコン（2cm幅に切る）","30g"],["コンソメスープの素（顆粒）","大さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68692/"},
+{"name":"ホタテの中華がゆ","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","500ml"],["生米（無洗米）","100g ＊無洗米を使わない場合は、生米を洗ったあとザルにあげしっかり水気をきる"],["ホタテ水煮（缶詰を汁ごと使う）","100g"],["鶏がらスープの素（顆粒）","小さじ1/2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【おかゆ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に盛り、トッピングはお好みで。"],"memo":"トッピング：ホタテ水煮、ねぎとザーサイの白ワイン和え（白髪ねぎとせん切りザーサイに、白ワイン・鶏がらスープの素・ラー油を少々加えて和える）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68799/"},
+{"name":"ユッケジャンスープ","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","400ml"],["もやし","50g"],["ねぎ（5mm幅の斜め薄切り）","100g（1本）"],["にんじん（5mm厚さの半月切り）","35g"],["牛薄切り肉（4cm幅に切る）","130g"],["にんにく、しょうが（共にすりおろし）","各小さじ1/2"],["しょうゆ","大さじ2"],["砂糖、コチュジャン","各大さじ1"],["豆板醤","小さじ1/2"],["鶏がらスープの素（顆粒）","小さじ1"],["ごま油（仕上げ用）","小さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、仕上げ用のごま油を加えてひと混ぜする。 トッピングはお好みで。"],"memo":"トッピング：小ねぎ（小口切り）、糸唐辛子、白すりごま","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68682/"},
+{"name":"参鶏湯（サムゲタン）","emoji":"🍗","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","400ml"],["もち麦","30g"],["鶏もも肉（3〜4cm角に切る）","300g"],["にんにく（スライス）","6g（ひとかけ分）"],["しょうが（せん切り）","3g（1/2かけ分）"],["ごま油","小さじ１"],["鶏がらスープの素（顆粒）","大さじ１"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：クコの実、ねぎ（白髪ねぎ）、しょうが（せん切り）、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68695/"},
+{"name":"簡単けんちん汁","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","400ml"],["油揚げ（縦半分に切り、1cm幅に切る）","20g（1枚）"],["しいたけ（1cm幅の薄切り）","30g（2枚）"],["だいこん（7mm〜1cm厚さのいちょう切り）","200g"],["にんじん（5〜7mm厚さの半月切り）","50ｇ"],["ごぼう（3mm厚さの斜め薄切り）","40g"],["しょうゆ","大さじ1"],["鶏がらスープの素（顆粒）","小さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：絹さや（ゆでて、斜め細切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68704/"},
+{"name":"酸辣湯（サンラータン）","emoji":"🍲","cat":"たべるスープ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","400ml"],["えのきだけ（半分長さに切る）","70g"],["しいたけ（5mm幅の薄切り）","50g（3〜4枚）"],["たけのこ水煮（細切り）","80g"],["豚肩ロース肉（しょうが焼き用、1cm幅の細切り）","150g"],["にんにく、しょうが（共にすりおろし）","各小さじ1"],["酢","大さじ1"],["しょうゆ、鶏がらスープの素（顆粒）","各小さじ2"],["豆板醤","小さじ1"],["ごま油（仕上げ用）","適量"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、仕上げ用のごま油を加えてひと混ぜする。トッピングはお好みで。"],"memo":"トッピング：パクチー、ラー油","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68432/"},
+{"name":"さばトマトカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["さば水煮（汁ごと）","1缶"],["トマト（2〜3cm角に切る）","1個"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["にんじん（1cm角に切る）","1/3本（50g）"],["カレールー（中辛・1かけを3等分にする）","2かけ"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パセリ…適量","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/45702/"},
+{"name":"ほうれん草のチーズカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["ほうれん草（2～3cm幅に切る）","1束（50g）"],["ベーコン（スライス、2～3cm幅に切る）","4枚（80g）"],["ウスターソース","小さじ2"],["カレールー（市販品、2～3cm角に切る）","3かけ"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE＆PASTE】を選ぶ。 ＊器に温かいごはん（分量外）を盛り、できあがったカレーをかける。 〈トッピング〉はお好みで。"],"memo":"トッピング：カッテージチーズ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/42046/"},
+{"name":"カレーうどん","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","300ml"],["しょうゆ","小さじ１"],["みりん","小さじ１"],["玉ねぎ（2〜3cm角に切る）","50g"],["ねぎ（2〜3cm幅に切る）","100g"],["豚ひき肉","100g"],["かつお節","6g"],["カレールー（市販品）","2人分（36g）"],["うどん","2玉"]],"steps":["うどん、《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。","うどんをゆで、できあがったカレーをかける。 《トッピング》はお好みで。"],"memo":"トッピング：ねぎ（斜め切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/57337/"},
+{"name":"クリームチャウダー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","300ml"],["玉ねぎ（2～3cm角に切る）","150g"],["ベーコン（2cm幅に切る）","50g"],["鶏もも肉（2～3cm角に切る）","100g"],["クリームシチュールー（市販品）","3人分（48g）"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：パセリ（刻む）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58493/"},
+{"name":"グリーンカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["ココナッツミルク","200ml"],["グリーンカレーペースト（市販品）","2人分（25g）"],["ピーマン（2～3cm角に切る）","1個（30g）"],["たけのこ（1～2cm角に切る）","150g"],["鶏もも肉（2～3cm角に切る）","150g"],["ナンプラー","小さじ2"],["鶏がらスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：パプリカ（乱切り／電子レンジ600Wで30秒加熱する）、バジル（葉）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/59010/"},
+{"name":"バターチキンカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["トマトの水煮（缶詰、ダイスカット）","1/2缶（200g）"],["鶏もも肉（2～3cm角に切る）","200g"],["カレールー（市販品、2～3cm角に切る）","3かけ"],["トマトケチャップ","大さじ2"],["バター","10g"],["ヨーグルト","大さじ4"]],"steps":["ヨーグルト、トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったらヨーグルトを混ぜ、器に注ぐ。 ＊トッピングはお好みで。"],"memo":"トッピング：パセリ（刻む）、生クリーム","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41792/"},
+{"name":"パンプキンシチュー","emoji":"🎃","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["かぼちゃ （種とわたを取り、皮をむいて2～3cm角に切る）","200g"],["シチュールー（市販品、2～3cm角に切る）","2かけ"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パセリ（刻む）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41794/"},
+{"name":"プラウンマサラカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["水","100ml"],["ココナッツミルク","1/2缶（200g）"],["トマト（2～3cm角に切る）","小1個（100g）"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["桜エビ（乾燥）","20g"],["ローストカシューナッツ（油・塩分不使用）","20g"],["バター","10g"],["カレー粉","大さじ1"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パクチー、チリペッパー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41790/"},
+{"name":"ポークカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","200ml"],["しょうゆ","小さじ1"],["玉ねぎ（2～3cm角に切る）","100g"],["じゃがいも（1～2cm角に切る）","100g"],["豚赤身肉（ブロック、3cm角に切る）","150g"],["バター","5g"],["ウスターソース","小さじ2"],["オイスターソース","小さじ1"],["カレールー（市販品）","2人分（36g）"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊器に温かいごはん（分量外）を盛り、できあがったカレーをかける。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58498/"},
+{"name":"基本のクリームシチュー","emoji":"🍲","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","50ml"],["牛乳","200ml"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["にんじん（2～3cm角に切る）","1/3本（50g）"],["鶏もも肉（2～3cm角に切る）","150g"],["バター","小さじ1（5g）"],["シチュールー（市販品、2～3cm角に切る）","2かけ"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP＆OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パセリ（みじん切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/42042/"},
+{"name":"基本のチキンカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["玉ねぎ（2〜3cm角に切る）","1/2個（100g）"],["にんじん（2〜3cm角に切る）","1/3本（50g）"],["鶏もも肉（2～3cm角に切る）","100g"],["にんにく、しょうが（すりおろす）","各小さじ1/2"],["カレールー（市販品、2～3cm角に切る）","3かけ"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP＆OKAYU】を選ぶ。 ＊器に温かいごはん（分量外）を盛り、できあがったカレーをかける。 トッピングはお好みで。"],"memo":"トッピング：福神漬け","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/42038/"},
+{"name":"キーマカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","250ml"],["玉ねぎ（2~3cm角に切る）","150g（小1個）"],["赤パプリカ（2~3cm角に切る）","50g（1/2個）"],["合いびき肉","200g"],["トマトケチャップ","大さじ4"],["みそ","大さじ1"],["ウスターソース","小さじ1"],["カレールー（市販品）","3人分（約54g）"],["ターメリックライス","人数分"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊ターメリックライスを盛り、できあがったカレーをかける。 トッピングはお好みで。"],"memo":"トッピング：温泉たまご","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68442/"},
+{"name":"バターチキンカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","30ml（大さじ２）"],["トマトの水煮（缶詰、ダイスカット）","400g（1缶）"],["ヨーグルト（プレーン）","大さじ6"],["鶏もも肉（2〜3cm角に切る）","250g"],["バター","20g"],["トマトケチャップ","大さじ3"],["カレールー（市販品）","4人分（約72ｇ）"],["ナン","人数分"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったカレーにナンを添える。トッピングはお好みで。"],"memo":"トッピング：パセリ（刻む）、生クリーム","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68436/"},
+{"name":"本鶏だしのトマトカレー","emoji":"🍛","cat":"カレー・シチュー","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["S&B本鶏だし","1袋"],["トマト水煮（缶詰・ダイスカット）","400g（1缶）"],["生クリーム","100ml"],["バター","20g"],["鶏もも肉（3〜4cm角に切る）","200g"],["S&B赤缶カレーパウダールウ","2袋"],["砂糖","小さじ1"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【たべるスープ】を選択。 【START｜STOP】ボタンで、スタート。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/79548/"},
+{"name":"かぼちゃとチーズのリゾット","emoji":"🎃","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","380ml"],["生米","100g"],["冷凍かぼちゃ（半解凍後、皮をむき2～3cm角に切る）","120g（皮をのぞき正味）"],["スライスチーズ（手でちぎる）","2枚"],["コンソメスープの素（顆粒）","小さじ1"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：イタリアンパセリ、黒こしょう","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58511/"},
+{"name":"きのこたっぷり豆乳リゾット風","emoji":"🫘","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","150ml"],["豆乳","200ml"],["生米（または無洗米）","50g"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["まいたけ（細かく割く）","50g"],["マッシュルーム（ブラウン、4等分に切る）","50g"],["ツナ缶（水煮）","1缶（水ごと・70g）"],["おからパウダー","大さじ2"],["粉チーズ","大さじ2"],["バター","10g"],["塩","小さじ1/2"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：黒こしょう…適量","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/45559/"},
+{"name":"ほうじ茶漬けスープ","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["ほうじ茶","200ml"],["しょうゆ","小さじ1"],["しいたけ（薄切りにする）","2個（30g）"],["鶏ももひき肉","100g"],["かつお節","1パック（4g）"],["塩","小さじ1/4"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊器に温かいごはん（分量外）を盛り、できあがったスープを注ぐ。 トッピングはお好みで。"],"memo":"トッピング：大葉（せん切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41751/"},
+{"name":"パルテノのトマトリゾット風","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","150ml"],["トマトジュース（無塩）","200ml"],["生米（または無洗米）","80g"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["ベーコン（2〜3cm幅に切る）","30g"],["パルテノ プレーン 砂糖不使用","50g※100g入りの半量を使います"],["にんにく（すりおろす）","小さじ1/2"],["コンソメ（顆粒）","小さじ1"],["塩","小さじ1/3"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】モードを選ぶ。","出来上がったら器に注ぎ、トッピング用のパルテノをのせ、ブラックペッパー、エキストラバージンオリーブオイルで仕上げる。お好みでイタリアンパセリをのせる。"],"memo":"トッピング：パルテノ プレーン 砂糖不使用…50g ※残り半量をトッピングとして使います、ブラックペッパー…適量、エキストラバージンオリーブオイル…適量、イタリアンパセリ…適量","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/45718/"},
+{"name":"三つ葉と春菊のおかゆ","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","400ml"],["米","40g"],["三つ葉、春菊（2〜3cm幅に切る）","合わせて10g"],["塩","ふたつまみ"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP＆OKAYU】モードを選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/67924/"},
+{"name":"中華風茶漬けスープ","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","300ml"],["ねぎ（2～3cm幅に切る）","1本（80g）"],["桜エビ（乾燥）","10g"],["ザーサイ（味付き）","20g"],["焼きのり（おにぎり用、手でちぎる）","1枚"],["オイスターソース","大さじ1"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊器に温かいごはん（分量外）を盛り、できあがったスープを注ぐ。 トッピングはお好みで。"],"memo":"トッピング：パクチー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41753/"},
+{"name":"切り干し大根で作る腸活粥","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水（切り干し大根の戻し汁）","400ml"],["生米","70g"],["切り干し大根（乾燥）","20g ＊サッと水で洗い、水（400ml）につけて約20分おく。"],["しょうが（すりおろす）","小さじ2"],["塩麹","大さじ2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：しょうが（せん切り）、黒ごま","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41755/"},
+{"name":"押し麦入りのミネストローネ","emoji":"🍅","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["トマト水煮（缶詰、ダイスカット）","300g"],["押し麦","大さじ2"],["玉ねぎ（2～3cm角に切る）","50g"],["セロリ（2～3cm角に切る）","20g"],["パプリカ（2～3cm角に切る）","50g"],["にんじん（2～3cm角に切る）","50g"],["ベーコン（2cm幅に切る）","30g"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：パセリ（刻む）、オリーブオイル","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/57323/"},
+{"name":"離乳食　かぼちゃペースト","emoji":"🎃","cat":"おかゆ・リゾット","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":8,"ing":[["水","150ml"],["かぼちゃ","200g"]],"steps":["かぼちゃは皮・種・わたを取り、2〜3cm角に切る。","材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/67814/"},
+{"name":"離乳食　にんじんペースト","emoji":"🥕","cat":"おかゆ・リゾット","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":10,"ing":[["水","200ml"],["にんじん（皮をむき、2～3cm角に切る）","200g"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/60430/"},
+{"name":"離乳食　ミネストローネ","emoji":"🍅","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","250ml"],["トマト(1.5cm角に切る)","1個（150g）"],["鶏ささみ(1.5cm角に切る)","1本（50g）"],["玉ねぎ（1.5cm角に切る）","50g"],["じゃがいも（1.5cm角に切る）","50g"],["にんじん（1.5cm角に切る）","30g"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP＆OKAYU】モードを選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/67851/"},
+{"name":"離乳食　基本のおかゆ","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","400ml"],["生米","40g"],["水","420ml"],["生米","60g"],["水","400ml"],["生米","80g"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、 10倍がゆは、【POTAGE&PASTE】を選ぶ。 7倍がゆは、【SOUP&OKAYU】を選ぶ。 5倍がゆは、【SOUP&OKAYU】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/60436/"},
+{"name":"離乳食　小松菜ペースト","emoji":"🥦","cat":"おかゆ・リゾット","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":8,"ing":[["水","50ml"],["小松菜（2〜3cm幅に切る）","200g"]],"steps":["水、小松菜の葉、茎の順番で入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/67820/"},
+{"name":"鶏とブロッコリーの中華がゆ","emoji":"🍗","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","350ml"],["生米","50g"],["冷凍ブロッコリー（半解凍する）","100g"],["鶏ささみ（2～3cm幅に切る）","100g"],["鶏がらスープの素（顆粒）","小さじ2"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：桜エビ（乾燥）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/59018/"},
+{"name":"おかゆ","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","650ml"],["生米（無洗米）","150g（約1合） ＊無洗米を使わない場合は、生米を洗ったあとザルにあげ、しっかり水気をきる"],["水","350ml"],["生米（無洗米）","75g（約1/2合） ＊無洗米を使わない場合は、生米を洗ったあとザルにあげ、しっかり水気をきる"]],"steps":["水、米を入れる。","【MODE】ボタンをタッチし、 【おかゆ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に盛り、トッピングはお好みで。"],"memo":"トッピング：梅ぼし、昆布の佃煮など","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68755/"},
+{"name":"ミニトマトのリゾット","emoji":"🍚","cat":"おかゆ・リゾット","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":4,"ing":[["水","280ml"],["トマトの水煮（缶詰、ダイスカット）","200g（1/2缶）"],["生米（無洗米）","80g ＊無洗米を使わない場合は、生米を洗ったあとザルにあげ、しっかり水気をきる"],["ミニトマト（半分に切る）","120g（10個）"],["ベーコン（2cm幅に切る）","60g"],["スライスチーズ（ちぎって入れる）","2枚"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【おかゆ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に盛り、トッピングはお好みで。"],"memo":"トッピング：バジルの葉、粉チーズ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68794/"},
+{"name":"さばトマトパスタ","emoji":"🍅","cat":"ソース・たれ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["トマトの水煮（缶詰、ダイスカット）","1缶（400g）"],["さばみそ煮（汁ごと）","1缶"],["玉ねぎ（2〜3cm角に切る）","1/4個（50g）"],["にんにく（すりおろす）","1かけ"],["オリーブオイル","大さじ1"],["塩、こしょう","少々"]],"steps":["材料を材料表の順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】モードを選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：パセリ…適量","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/45688/"},
+{"name":"なすのピリ辛麻婆春雨","emoji":"🥫","cat":"ソース・たれ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["なす（2～3cm角に切る）","1本（80g）"],["ねぎ（2～3cm幅に切る）","50g"],["豚ひき肉","150g"],["しょうが（すりおろす）","5g"],["にんにく（すりおろす）","5g"],["豆板醤","小さじ2"],["オイスターソース","大さじ3"],["みそ","大さじ2"],["春雨（乾燥）","30g"]],"steps":["春雨と《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。","春雨をゆで、できあがった麻婆を混ぜる。 《トッピング》はお好みで。"],"memo":"トッピング：小ねぎ（小口切り）、山椒","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58517/"},
+{"name":"エスニックピーナッツだれ","emoji":"🥫","cat":"ソース・たれ","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["酢","60ml"],["ナンプラー","60ml"],["ししとう","3本（ピーマン30gでも）"],["バターピーナッツ","60g"],["にんにく（薄切り）","10g"],["はちみつ","60ml"],["豆板醤","小さじ1"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58883/"},
+{"name":"ゴロゴロごぼうのボロネーゼソース","emoji":"🥩","cat":"ソース・たれ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":2,"ing":[["水","100ml"],["玉ねぎ（2～3cm角に切る）","1/4個（50g）"],["ごぼう","1本（100g） ＊皮をむいて1〜2cm幅に切る。水に10分さらし、水気をきる。"],["合いびき肉","100g"],["トマトケチャップ","大さじ4"],["ウスターソース","小さじ2"],["塩","小さじ1/4"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊アレンジはお好みで。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41804/"},
+{"name":"サーモンのクリームソース","emoji":"🥫","cat":"ソース・たれ","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["生クリーム","150ml"],["牛乳","50ml"],["スモークサーモン（生食用）","120g"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。 ＊できあがったソースはゆでたパスタ（分量外）とあたたかいうちにあえて器に盛る。　《トッピング》はお好みで。"],"memo":"トッピング：オニオンスライス、ディル、レモン（くし形切り）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/59008/"},
+{"name":"ジャージャー麺","emoji":"🥫","cat":"ソース・たれ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["ねぎ（1～2cm角に切る）","50g"],["たけのこ（1～2cm角に切る）","150g"],["豚ひき肉","200g"],["かつお節","3g"],["にんにく（すりおろす）","5g"],["甜麺醤","大さじ2"],["オイスターソース","大さじ2"],["中華麺","3玉"]],"steps":["中華麺と《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。","ゆでた中華麺に、できあがったソースをかける。《トッピング》はお好みで。"],"memo":"トッピング：きゅうり（せん切り）、トマト（くし形切り）、白髪ねぎ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/59012/"},
+{"name":"ツナのジェノベーゼソース","emoji":"🥫","cat":"ソース・たれ","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["オリーブオイル","1カップ（200ml）"],["ツナ缶（水煮）","2缶（水ごと・140g）"],["バジルの葉","20g"],["ピーナッツ（有塩）","20g"],["バター","10g"],["粉チーズ","小さじ2"],["にんにく（すりおろす）、塩","各小さじ1/2"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。 ＊アレンジはお好みで。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41799/"},
+{"name":"ミートソースパスタ","emoji":"🥩","cat":"ソース・たれ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-2","serv":4,"ing":[["水","50ml"],["赤ワイン","大さじ2"],["トマト水煮（缶詰、ダイスカット）","300g"],["玉ねぎ（2～3cm角に切る）","100g"],["にんじん（2～3cm角に切る）","75g"],["合いびき肉","100g"],["にんにく（すりおろす）","小さじ1/2"],["ビーフシチュールー（市販品）","2人分（36g）"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOUP&OKAYU】を選ぶ。 ＊器にゆでたパスタ（分量外）を盛り、できあがったソースをかける。《トッピング》はお好みで。"],"memo":"トッピング：粉チーズ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58488/"},
+{"name":"和風玉ねぎだれ","emoji":"🥫","cat":"ソース・たれ","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["しょうゆ","80ml"],["リンゴ酢（レモン汁やお酢でも）","小さじ1"],["玉ねぎ（2～3cm角に切る）","80g"],["りんご（2～3cm角に切る）","80g"],["しょうが（薄切り）","8g"],["はちみつ","80ml"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58523/"},
+{"name":"大葉のジェノベーゼソース","emoji":"🥫","cat":"ソース・たれ","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":4,"ing":[["オリーブオイル","250ml"],["大葉","20枚"],["バターピーナッツ","20g"],["粉チーズ","20g"],["塩","小さじ1と1/3（8g）"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。 ＊器にゆでたパスタ（分量外）を盛り、できあがったソースをあえる。《トッピング》はお好みで。"],"memo":"トッピング：大葉（細切り）、バターピーナッツ（砕く）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/59004/"},
+{"name":"豆腐のホワイトクリームソース","emoji":"🍢","cat":"ソース・たれ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":3,"ing":[["牛乳","100ml"],["木綿豆腐（3連パックタイプ）","2パック（300g）"],["バター","10g"],["コンソメスープの素（顆粒）","小さじ2"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】を選ぶ。 ＊アレンジはお好みで。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41797/"},
+{"name":"カリフラワーのホワイトパスタソース","emoji":"🥫","cat":"ソース・たれ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":5,"ing":[["牛乳","400ml"],["玉ねぎ（2〜3cm角に切る）","50g（大1/4個）"],["カリフラワー（小房に分ける、冷凍のものでもOK）","250g"],["ベーコン（2cm幅に切る）","100g"],["コンソメスープの素（顆粒）","小さじ４"],["パスタ","人数分"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊器にゆでたパスタを盛り、できあがったソースをかける。 トッピングはお好みで。 ＊保存の目安：冷蔵庫で約3日間"],"memo":"トッピング：卵黄、黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68411/"},
+{"name":"トマトのパスタソース","emoji":"🍅","cat":"ソース・たれ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":2,"ing":[["トマト水煮（缶詰・ダイスカット）","400g（1缶）"],["玉ねぎ（2〜3cm角に切る）","50g（大1/4個）"],["セロリ（2cm角に切る）","25g"],["ベーコン（2cm幅に切る）","25g"],["トマトペースト","大さじ2"],["にんにく（すりおろし）","小さじ1"],["オリーブオイル","小さじ1"],["塩","小さじ1"],["パスタ","人数分"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊器にゆでたパスタを盛り、できあがったソースであえる。 トッピングはお好みで。 ＊保存の目安：冷蔵庫で約1週間"],"memo":"トッピング：粉チーズ、バジルの葉","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68395/"},
+{"name":"王道ミートソース","emoji":"🥩","cat":"ソース・たれ","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","30ml"],["トマト水煮（缶詰・ダイスカット）","350g"],["玉ねぎ（2~3cm角に切る）","100g（大1/2個）"],["にんじん（2~3cm角に切る）","100g"],["合いびき肉","200g"],["にんにく（すりおろし）","小さじ1"],["塩","小さじ1/2"],["ビーフシチュールー（市販品）","3人分（約54g）"],["パスタ","人数分"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊器にゆでたパスタを盛り、できあがったソースをかける。 トッピングはお好みで。"],"memo":"トッピング：パセリ（刻む）、粉チーズ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68456/"},
+{"name":"おからのガパオライス","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":1,"ing":[["おから","100g"],["パプリカ（赤、5mm角に切る）","1/2個（50g）"],["にんにく（みじん切り）","ひとかけ分"],["鷹の爪（種なし、輪切り）","1本"],["バジルの葉","10枚"],["目玉焼き","1枚"],["サラダ油","小さじ2"],["【A】ナンプラー","小さじ2"],["【A】オイスターソース、砂糖","各小さじ1"]],"steps":["【SOYMILK】モードで 《おから》 を作る。","フライパンに油をひき、弱火でにんにく、鷹の爪を炒める。 にんにくの香りがたってきたら中火でパプリカをサッと炒める。 おからを加え、ヘラでだまにならないよう炒める。","②を【A】で味付けし、バジルをちぎって入れる。 器に温かいごはん（分量外）とガパオを盛り、目玉焼きを添える。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23750/"},
+{"name":"おからのポテサラ風","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["おから","200g ＊加熱しないため、作りたてのものを使ってください。"],["ロースハム（スライス、短冊切り）","2枚"],["きゅうり（小口切り）","1/3本（30g）"],["紫玉ねぎ（または玉ねぎ、薄切り）","1/4個（50g）"],["マヨネーズ","大さじ3〜4"],["粒マスタード","小さじ2"]],"steps":["【SOYMILK】モードで 《おから》 を作る。","きゅうりは塩少々（分量外）をふってもみ、水気が出てきたらキッチンペーパーなどでふく。 紫玉ねぎに辛味がある場合は水に5分さらし、水気をきる。","ボウルに全て入れ、混ぜ合わせる。"],"memo":"トッピング：黒こしょう（粗びき）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23752/"},
+{"name":"アーモンドミルクココア","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["水","300ml"],["ローストアーモンド（油・塩分不使用）","20g"],["ココア","小さじ4"],["はちみつ","お好みで"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOYMILK】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58467/"},
+{"name":"オーツミルク","emoji":"🫘","cat":"豆乳・おから","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":3,"ing":[["水","400ml"],["オートミール","50g"],["はちみつ","大さじ1"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41787/"},
+{"name":"ホットアーモンドミルク","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":3,"ing":[["水","500ml"],["ローストアーモンド（油・塩分不使用）","100g"]],"steps":["ローストアーモンドは水に12時間浸ける。","1を浸けていた水ごと入れる。 【SELECT】ボタンを押し、【SOYMILK】を選ぶ。 ＊できあがったらお好みでこす。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41784/"},
+{"name":"即席豆乳&おから","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["大豆（乾燥）","付属計量スプーン5杯（100g）"],["水","Maxラインまで（約530ml）"]],"steps":["乾燥したままの大豆を入れ、Maxラインまで水を注ぐ。 ＊水より先に大豆を入れてもOK。","【SELECT】ボタンを押し、【SOYMILK】モードを選ぶ。","ボウルの上にザルとさらし布を用意し、②を流し入れてこす。 さらし布をかたく絞って豆乳とおからに分ける（熱いのでやけどに注意！目の細かいザルならこすだけでもOK）。"],"memo":"できあがり量の目安：豆乳：約250~280ml／おから：約280～300g","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/49715/"},
+{"name":"基本の豆乳&おから","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["大豆（乾燥）","付属計量スプーン4杯（80g）"],["水","Maxラインまで（約450ml）"]],"steps":["大豆をよく洗い、たっぷりの水（大豆の3倍量を目安）に6〜8時間浸ける。大豆のシワが取れたら、ザルにあげて水気をきる。","浸水させた大豆を入れ、Maxラインまで水を注ぐ。 ＊水より先に大豆を入れてもOK。","【SELECT】ボタンを押し、【SOYMILK】モードを選ぶ。","ボウルの上にザルとさらし布を用意し、③を流し入れてこす。 さらし布をかたく絞って豆乳とおからに分ける（熱いのでやけどに注意！目の細かいザルならこすだけでもOK）。"],"memo":"できあがり量の目安：豆乳：約350~380ml／おから：約180〜200g","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23746/"},
+{"name":"自家製豆乳で作るシェントウジャン","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["基本の豆乳","全量 ＊できあがったばかりのものを使う。"],["ザーサイ（味つき、粗めのみじん切りにする）","40g"],["桜エビ（乾燥、粗めのみじん切りにする）","…大さじ2（10g）"],["黒酢（または酢）","大さじ2"],["しょうゆ","小さじ2"],["塩","小さじ1/4"]],"steps":["【SOYMILK】モードで《基本の豆乳》を作る。","器2つにザーサイ、桜エビ、黒酢、しょうゆ、塩を半量ずつ入れる。","できあがった豆乳を温かいままの器にそれぞれ流し入れ、 ふんわり固まるまで軽く混ぜてからお好みでトッピングをかける。"],"memo":"トッピング：パクチー、ラー油","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41776/"},
+{"name":"自家製豆腐の白和え","emoji":"🍢","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["しょうゆ","大さじ1"],["大豆（乾燥）","60g ＊大豆はよく洗い、水（240ml）に6～8時間浸ける。"],["かつお節","6g"],["にがり","小さじ1"],["ゆでほうれん草（100g）、ちくわ（2本／小口切り）、ひじき（乾燥5gを水で戻す）",""]],"steps":["にがりと《具材》以外の材料（大豆は浸けた水ごと）を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOYMILK】を選ぶ。","できあがったら器に移し、にがりを加えて混ぜ粗熱を取る。冷蔵庫で2時間ほど冷やす。","《具材》を混ぜる。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/59021/"},
+{"name":"豆乳チャイ","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["水","300ml"],["大豆（乾燥）","20g"],["しょうが（薄切り）","5g"],["紅茶の茶葉（ティーバック1袋分でも）","小さじ1"],["シナモンパウダー","小さじ1/2"],["はちみつ","お好みで"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOYMILK】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。"],"memo":"トッピング：シナモンパウダー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58472/"},
+{"name":"豆乳マサラチャイ","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["豆乳","1カップ（150ml）"],["【A】熱湯","50ml"],["【A】お好きな紅茶（ティーバッグ）","1袋"],["【A】砂糖","小さじ2"],["【A】シナモンパウダー、しょうが（すりおろす）","各小さじ1/2"],["【A】カルダモンパウダー","小さじ1/4"]],"steps":["【SOYMILK】モードで 《豆乳》 を作る。","マグカップなどに【A】を入れる。全体を混ぜながら、2分ほど紅茶を抽出する。","②に温かい豆乳を混ぜながら注ぐ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23754/"},
+{"name":"まるごと豆乳","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-3","serv":5,"ing":[["水","700ml"],["大豆（乾燥）","70g（付属計量スプーン3と1/2杯）"],["水","400ml"],["大豆（乾燥）","40g（付属計量スプーン2杯）"]],"steps":["水、大豆を入れる。","【MODE】ボタンをタッチし、 【豆乳】を選択。 【START｜STOP】ボタンで、スタート。 ＊保存の目安：冷蔵庫で約3日間"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68802/"},
+{"name":"アーモンドミルク","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-3","serv":4,"ing":[["水","600ml"],["アーモンド（塩・油不使用）","40g"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【豆乳】を選択。 【START｜STOP】ボタンで、スタート。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68810/"},
+{"name":"エビと枝豆の豆乳スープ","emoji":"🫘","cat":"豆乳・おから","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["水","130ml"],["調整豆乳","260ml"],["玉ねぎ（2〜3cm角に切る）","150g（小1個）"],["冷凍むきエビ（半解凍する）","100g"],["むき枝豆","70g"],["ベーコン（2cm幅に切る）","30g"],["クリームシチュールー（市販品）","4人分（約72g）"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ゆでむきエビ、むき枝豆","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68429/"},
+{"name":"濃厚豆乳ココア","emoji":"🫘","cat":"豆乳・おから","mode":"SOYMILK","min":30,"pot":"RSY-3","serv":4,"ing":[["水","600ml"],["大豆（乾燥）","40g（付属計量スプーン2杯）"],["ココアパウダー","大さじ3"],["砂糖","大さじ2"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【豆乳】を選択。 【START｜STOP】ボタンで、スタート。 ＊甘みを足したいときは、砂糖の量を調整してください。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68807/"},
+{"name":"うるツヤ美肌スムージー","emoji":"🥤","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["水","50ml"],["調整豆乳","150ml"],["冷凍パイナップル（半解凍する）","150g"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58457/"},
+{"name":"ガスパチョ","emoji":"🍅","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":3,"ing":[["水","100ml"],["酢","大さじ1"],["トマト（2～3cm角に切る）","2個（300g）"],["パプリカ（赤、2～3cm角に切る）","50g"],["にんにく（すりおろす）","小さじ1/4"],["塩","小さじ1/2"]],"steps":["トッピング以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：きゅうり（ダイスカット）、オリーブオイル、タバスコ","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/41812/"},
+{"name":"栄養バランスアップスムージー","emoji":"🥤","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["牛乳","300ml"],["バナナ（2～3cm角に切る）","100g"],["にんじん（2～3cm角に切る）","50g"],["小松菜（2～3cm幅に切る）","30g"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58445/"},
+{"name":"眼精疲労改善スムージー","emoji":"🥤","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["水","100ml"],["ヨーグルト","200g"],["冷凍ブルーベリー（半解凍する）","50g"],["冷凍マンゴー（半解凍する）","50g"],["はちみつ","小さじ2"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/57332/"},
+{"name":"腸活サビとりスムージー","emoji":"🥤","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-2","serv":2,"ing":[["甘酒","200ml"],["冷凍いちご（半解凍する）","200g"],["りんご（2～3cm角に切る）","50g"]],"steps":["材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【JUICE&CLEAN】を選ぶ。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58462/"},
+{"name":"いちごとキウイの甘酒スムージー","emoji":"🥤","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-3","serv":4,"ing":[["甘酒","400ml"],["いちご（半分に切る）","200g（13〜15粒）"],["ゴールデンキウイ（1～2㎝角に切る）","160g（２個）"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ジュース｜CLEAN】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ローズマリー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68820/"},
+{"name":"グリーンスムージー","emoji":"🥤","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-3","serv":4,"ing":[["水","400ml"],["小松菜（2〜3cm長さに切る）","60g（2株）"],["りんご（芯を取り、皮ごと1〜2cm角に切る）","240g（大1個）"],["にんじん（１〜２cm角に切る）","100g（2/3本）"],["氷（家庭用製氷機で作ったもの）","50g"],["はちみつ、砂糖","お好みで"],["はちみつ、砂糖","お好みで"],["水","200ml"],["小松菜（2〜3cm長さに切る）","30g（1株）"],["りんご（芯を取り、皮ごと1〜2cm角に切る）","120g（大1/2個）"],["にんじん（1〜2cm角に切る）","50g（1/3本）"],["氷（家庭用製氷機で作ったもの）","25g"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ジュース｜CLEAN】を選択。 【START｜STOP】ボタンで、スタート。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68817/"},
+{"name":"ブルーベリーとバナナのスムージー","emoji":"🥤","cat":"スムージー","mode":"JUICE&CLEAN","min":3,"pot":"RSY-3","serv":4,"ing":[["牛乳","400ml"],["冷凍ブルーベリー（半解凍する）","200g"],["バナナ（ちぎって入れる）","200g（２本）"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ジュース｜CLEAN】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。"],"memo":"トッピング：ブルーベリー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68824/"},
+{"name":"おからのバナナスコップケーキ","emoji":"🫘","cat":"スイーツ","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":2,"ing":[["おから","100g"],["バナナ","2本（200g）"],["【A】卵（割り溶く）","1個"],["【A】板チョコレート（刻む）","1枚（50g）"],["【A】バター（無塩、常温に戻す）","20g"],["【A】砂糖","大さじ1"],["ベーキングパウダー","小さじ2"]],"steps":["【SOYMILK】モードで 《おから》 を作る。","バナナは1本をつぶし、もう1本は縦横半分に切る。 ボウルにつぶしたバナナ、おから、【A】を入れて混ぜる。 ベーキングパウダーを少しずつ加え、さらに混ぜる。","ほうろうのバットなどにクッキングシートを敷き、 その上に②を流し入れる。残りのバナナをのせて、 予熱した180℃のオーブンで30分ほど焼く。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/23748/"},
+{"name":"なめらか濃厚かぼちゃプリン","emoji":"🎃","cat":"スイーツ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["牛乳","250ml"],["かぼちゃ（2～3cm角に切る）","200g"],["溶き卵","2個"],["砂糖","60g"],["シナモン","少々"],["【A】砂糖","50g"],["【A】水","大さじ1"],["水","大さじ1"]],"steps":["［自動調理ポット］に牛乳。かぼちゃの順で入れ、 【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。","①をボウルに注ぎ、60℃くらいになるまで粗熱をとる。","カラメルソース 小鍋に【A】を入れ火にかける。焦げ茶色になるまで煮詰めたら、火から下ろし、濡れ布巾の上に置き、水を加える。 耐熱容器（プリンカップ）に注ぐ。","②に溶き卵、砂糖、シナモンを入れて泡立てないように全体を混ぜる。 ザルででこす。","④を③に注ぐ。","⑤を［ハイスチームエアーオーブン］の［バスケット］の［内アミ］の上にのせ、［本体］にセットし【Hi steam】モードで 、 85℃／25分 加熱する。"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/67892/"},
+{"name":"マンゴープリン","emoji":"🍮","cat":"スイーツ","mode":"POTAGE&PASTE","min":30,"pot":"RSY-2","serv":2,"ing":[["水","50ml"],["レモン汁","大さじ1"],["冷凍マンゴー（半解凍する）","250g"],["砂糖","50g"],["ゼラチン","5g"],["生クリーム","100ml"]],"steps":["ゼラチン、生クリーム以外の材料を材料表の順に入れる。","【SELECT】ボタンを押し、【POTAGE&PASTE】モードを選ぶ。","できあがったらボウルなどに注ぎ、熱いうちにゼラチンをふり入れてよく混ぜ溶かし、生クリームを加えて混ぜる。","器に盛り、冷蔵庫で冷やし固める。 ＊トッピングはお好みで。"],"memo":"トッピング：生クリーム（泡立てる）、マンゴー","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/50565/"},
+{"name":"自家製おしるこ","emoji":"🍮","cat":"スイーツ","mode":"SOYMILK","min":30,"pot":"RSY-2","serv":4,"ing":[["水","300ml"],["小豆（乾燥）","30g"],["砂糖","30g"]],"steps":["《トッピング》以外の材料を表記の上から順に入れる。","【SELECT】ボタンを押し、【SOYMILK】を選ぶ。 ＊できあがったら器に注ぎ、《トッピング》はお好みで。 甘みを足したいときは砂糖の量で調節してください。"],"memo":"トッピング：もち（焼く）","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/58440/"},
+{"name":"お手軽しるこ","emoji":"🍮","cat":"スイーツ","mode":"SOYMILK","min":30,"pot":"RSY-3","serv":6,"ing":[["水","600ml"],["小豆（乾燥）","60g"],["砂糖","60g"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【豆乳】を選択。 【START｜STOP】ボタンで、スタート。 ＊できあがったら器に注ぎ、トッピングはお好みで。 ＊甘みを足したいときは、砂糖の量を調整してください。"],"memo":"トッピング：ゆで白玉","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/68813/"},
+{"name":"まるごと旨だし","emoji":"🥣","cat":"だし・その他","mode":"POTAGE&PASTE","min":30,"pot":"RSY-3","serv":2,"ing":[["水","600ml"],["昆布（2cm幅に切る）","3g"],["かつお節","12g"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【ポタージュ｜ペースト】を選択。 【START｜STOP】ボタンで、スタート。 ＊保存の目安：冷蔵庫で約3日間"],"src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/64478/"},
+{"name":"本鶏だしの白湯麺","emoji":"🍗","cat":"だし・その他","mode":"SOUP&OKAYU","min":30,"pot":"RSY-3","serv":5,"ing":[["S&B本鶏だし","1袋"],["水","350ml"],["鶏むね肉（2〜3cm角に切る）","300g"],["ナンプラー","小さじ4"],["砂糖","大さじ1"],["中華麺","4〜5人分"]],"steps":["材料を表記の上から順に入れる。","【MODE】ボタンをタッチし、 【スープ】を選択。 【START｜STOP】ボタンで、スタート。 ＊器にゆでた中華麺を盛り、できあがったスープを注ぐ。 《トッピング》はお好みで。"],"memo":"トッピング：ねぎ（白髪ねぎ）、小ねぎ（小口切り）、ゆで卵、糸唐辛子","src":"récolte 公式レシピ","link":"https://recolte-jp.com/recipe/79550/"}
+];
+
+let data = [];
+let filterCat = 'すべて';
+let favOnly = false;
+let query = '';
+let current = null;
+let editingId = null;
+let servMul = 1;
+
+function load(){
+  try{ data = JSON.parse(localStorage.getItem(KEY)) || []; }
+  catch(e){ data = []; }
+  migrate();
+  if(!localStorage.getItem(KEY_SEED)){
+    data = data.filter(r=>!r.seed);   // 古いお手本を入れかえる
+    seed();
+  }
+}
+function migrate(){
+  let changed = false;
+  data.forEach(r=>{
+    if(!r.pot){ r.pot = 'RSY-2'; changed = true; }
+    if(!MODES[r.mode]){ r.mode = 'SOUP&OKAYU'; changed = true; }
+    if(!r.min){ r.min = MODES[r.mode].min; changed = true; }
+  });
+  if(changed) save();
+}
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(data)); }
+  catch(e){ toast('保存できませんでした（容量オーバー？）'); }
+}
+function seed(){
+  const now = Date.now();
+  SEED.forEach((r,i)=>{
+    data.push({
+      id:'seed-'+i+'-'+now, name:r.name, emoji:r.emoji, cat:r.cat,
+      mode:r.mode, min:r.min, pot:r.pot, serv:r.serv,
+      ing:r.ing.map(x=>({n:x[0], a:x[1]})),
+      steps:r.steps, memo:r.memo, src:r.src, link:r.link||'', fav:false, seed:true
+    });
+  });
+  localStorage.setItem(KEY_SEED,'1');
+  save();
+}
+
+/* ---------- できあがり写真 ----------
+   写真はレシピ本体とは別のキーに1枚ずつ保存する。
+   こうしておくと、写真で容量オーバーしてもレシピ側の保存は壊れない。 */
+const PKEY = id => 'recolte-pot-photo-' + id;
+const photoCache = new Map();     // 一覧を描くたびに localStorage を読まないため
+
+function getPhoto(id){
+  if(photoCache.has(id)) return photoCache.get(id);
+  let v = null;
+  try{ v = localStorage.getItem(PKEY(id)); }catch(e){}
+  photoCache.set(id, v);
+  return v;
+}
+function setPhoto(id, dataUrl){
+  try{ localStorage.setItem(PKEY(id), dataUrl); photoCache.set(id, dataUrl); return true; }
+  catch(e){ return false; }
+}
+function removePhoto(id){
+  try{ localStorage.removeItem(PKEY(id)); }catch(e){}
+  photoCache.set(id, null);
+}
+
+/* 撮った写真はそのままだと数MBあるので、長辺900pxのJPEGに縮めてから保存する */
+function shrinkImage(file, cb){
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = ()=>{
+    let w = img.naturalWidth, h = img.naturalHeight;
+    const MAX = 900;
+    if(Math.max(w,h) > MAX){
+      const s = MAX / Math.max(w,h);
+      w = Math.round(w*s); h = Math.round(h*s);
+    }
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    let d = c.toDataURL('image/jpeg', 0.72);
+    if(d.length > 420000) d = c.toDataURL('image/jpeg', 0.55);  // それでも大きければもう一段
+    URL.revokeObjectURL(url);
+    cb(d);
+  };
+  img.onerror = ()=>{ URL.revokeObjectURL(url); cb(null); };
+  img.src = url;
+}
+
+let photoTargetId = null;
+function pickPhoto(id){
+  photoTargetId = id;
+  document.getElementById('pFile').click();
+}
+document.getElementById('pFile').onchange = e=>{
+  const f = e.target.files[0];
+  e.target.value = '';
+  if(!f || !photoTargetId) return;
+  toast('写真を取りこんでいます…');
+  shrinkImage(f, d=>{
+    if(!d){ toast('この写真は読みこめませんでした'); return; }
+    if(setPhoto(photoTargetId, d)){
+      toast('写真をつけました');
+    }else{
+      toast('保存できません。写真を何枚か消してください');
+      return;
+    }
+    if(current && current.id === photoTargetId) drawDetail();
+    renderList();
+  });
+};
+
+function openLightbox(src){
+  document.getElementById('lbImg').src = src;
+  document.getElementById('lightbox').classList.add('on');
+}
+document.getElementById('lbClose').onclick =
+document.getElementById('lightbox').onclick = ()=>{
+  document.getElementById('lightbox').classList.remove('on');
+  document.getElementById('lbImg').src = '';
+};
+
+/* ---------- 一覧 ---------- */
+function renderChips(){
+  const el = document.getElementById('chips');
+  const all = ['すべて', ...CATS];
+  el.innerHTML = all.map(c=>
+    `<button class="chip ${c===filterCat?'on':''}" data-c="${c}">${c}</button>`).join('');
+  el.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{
+    filterCat = b.dataset.c; renderChips(); renderList();
+  });
+}
+
+function matches(r){
+  if(favOnly && !r.fav) return false;
+  if(filterCat!=='すべて' && r.cat!==filterCat) return false;
+  if(query){
+    const hay = (r.name+' '+r.cat+' '+r.mode+' '+MODES[r.mode].jp+' '
+                 +r.ing.map(i=>i.n).join(' ')+' '+(r.memo||'')).toLowerCase();
+    if(!hay.includes(query.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function renderList(){
+  const list = document.getElementById('list');
+  const hits = data.filter(matches);
+  document.getElementById('empty').style.display = hits.length? 'none':'block';
+  list.innerHTML = hits.map(r=>{
+    const p = getPhoto(r.id);
+    return `
+    <button class="card" data-id="${r.id}">
+      ${p ? `<img class="thumb" src="${p}" alt="">` : `<div class="emoji">${r.emoji||'🍽'}</div>`}
+      <div class="body">
+        <h3>${esc(r.name)}</h3>
+        <div class="meta">
+          <span class="tag">${esc(r.mode)}</span>
+          ${r.pot==='RSY-3' ? '<span class="pot">ラージ</span>' : ''}
+          <span>${r.serv}人分</span>
+        </div>
+      </div>
+      <div class="fav">${r.fav?'★':''}</div>
+    </button>`;
+  }).join('');
+  list.querySelectorAll('.card').forEach(b=>b.onclick=()=>openDetail(b.dataset.id));
+  renderBanner();
+}
+
+function renderBanner(){
+  const b = document.getElementById('banner');
+  const standalone = window.navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if(standalone || localStorage.getItem('hideBanner')){ b.innerHTML=''; return; }
+  b.innerHTML = `<div class="banner">
+    <div style="flex:1">共有ボタン →「ホーム画面に追加」で、アプリのように使えます。レシピが消えにくくなるのでおすすめです。</div>
+    <button id="bx">✕</button></div>`;
+  document.getElementById('bx').onclick = ()=>{ localStorage.setItem('hideBanner','1'); renderBanner(); };
+}
+
+/* ---------- 詳細 ---------- */
+const ORDER_NOTE = '材料は上から順に入れます（液体 → やわらかいもの → かたいもの・肉魚 → 氷）。'
+  + '液体を先に入れないと刃が回らず、止まってしまうことがあります。';
+
+function openDetail(id){
+  current = data.find(r=>r.id===id);
+  if(!current) return;
+  servMul = 1;
+  drawDetail();
+  document.getElementById('detail').scrollTop = 0;
+  openSheet('detail');
+}
+
+function drawDetail(){
+  const r = current;
+  const M = MODES[r.mode] || MODES['SOUP&OKAYU'];
+  document.getElementById('dTitle').textContent = r.name;
+  document.getElementById('dFav').textContent = r.fav?'★':'☆';
+  document.getElementById('dFav').style.color = r.fav?'var(--gold)':'';
+
+  const serv = Math.max(0.5, Math.round(r.serv*servMul*2)/2);   // 0.5人分きざみで見せる
+  const photo = getPhoto(r.id);
+  document.getElementById('dBody').innerHTML = `
+    ${photo ? `
+      <div class="shotwrap">
+        <img class="shot" id="dShot" src="${photo}" alt="${esc(r.name)}のできあがり">
+        <button class="zoom" id="dZoom">🔍 大きく</button>
+      </div>` : ''}
+    <div class="hero" style="${photo?'padding-top:4px':''}">
+      ${photo ? '' : `<div class="emoji">${r.emoji||'🍽'}</div>`}
+      <h2>${esc(r.name)}</h2>
+      <div class="cat">${esc(r.cat)}</div>
+    </div>
+    <button class="photobtn ${photo?'has':''}" id="dPhotoBtn">
+      ${photo ? '📷 写真をとりかえる' : '📷 できあがりの写真をつける'}
+    </button>
+    ${photo ? '<button class="photobtn has" id="dPhotoDel" style="color:var(--red2);margin-top:-6px">🗑 写真を消す</button>' : ''}
+    ${r.link ? `<a class="photobtn link" href="${esc(r.link)}" target="_blank" rel="noopener noreferrer">📷 公式ページで写真を見る</a>` : ''}
+    ${r.pot==='RSY-3' ? `<div class="warn">これは容量約800mlの<b>［自動調理ポット ラージ RSY-3］</b>のレシピです。
+      RSY-2（約600ml）で作るときは、材料をぜんぶ <b>3/4 くらい</b>に減らして、Maxラインを超えないようにしてください。
+      <button class="btn" id="dShrink" ${servMul===0.75?'disabled':''}
+        style="width:100%;margin-top:9px;padding:11px;font-size:13.5px${servMul===0.75?';opacity:.55':''}">
+        ${servMul===0.75?'✓ RSY-2 の分量にしました':'RSY-2 の分量にする（3/4）'}</button></div>` : ''}
+    <div class="specs">
+      <div class="spec mode"><div class="l">モード</div><div class="v">${esc(r.mode)}</div></div>
+      <div class="spec"><div class="l">めやす</div><div class="v">${r.min}<small>分</small></div></div>
+      <div class="spec"><div class="l">できあがり</div><div class="v">${serv}<small>人分</small></div></div>
+    </div>
+    <div class="ordernote"><b style="color:var(--gold)">${esc(M.jp)}</b>　${esc(M.note)}</div>
+    <div class="ordernote">${esc(ORDER_NOTE)}</div>
+
+    <h4 class="sec">材料（この順に入れる）</h4>
+    <div class="servrow">
+      <span class="lbl">分量</span>
+      <div class="stepper">
+        <button id="mDown">−</button><span id="mView">${serv}人分</span><button id="mUp">＋</button>
+      </div>
+      ${servMul!==1?'<span style="font-size:12px;color:var(--gold)">×'+servMul+'</span>':''}
+    </div>
+    <ul class="ing">
+      ${r.ing.map(i=>`<li><span class="n">${esc(i.n)}</span><span class="a">${esc(scaleAmount(i.a,servMul))}</span></li>`).join('')}
+    </ul>
+
+    <h4 class="sec">作り方</h4>
+    <ol class="steps">${r.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
+
+    ${r.memo?`<h4 class="sec">メモ</h4><div class="memo">${esc(r.memo)}</div>`:''}
+    ${r.src?`<div class="src">出典：${esc(r.src)}</div>`:''}
+    <div style="height:20px"></div>`;
+
+  document.getElementById('dPhotoBtn').onclick = ()=>pickPhoto(r.id);
+  if(photo){
+    const open = ()=>openLightbox(photo);
+    document.getElementById('dShot').onclick = open;
+    document.getElementById('dZoom').onclick = open;
+    document.getElementById('dPhotoDel').onclick = ()=>{
+      if(!confirm('この写真を消します。よろしいですか？')) return;
+      removePhoto(r.id); drawDetail(); renderList(); toast('写真を消しました');
+    };
+  }
+
+  const shrink = document.getElementById('dShrink');
+  if(shrink) shrink.onclick = ()=>{ servMul = 0.75; drawDetail(); toast('RSY-2 の分量にしました'); };
+
+  document.getElementById('mUp').onclick   = ()=>{ servMul = Math.min(4, servMul+0.25); drawDetail(); };
+  document.getElementById('mDown').onclick = ()=>{ servMul = Math.max(0.25, servMul-0.25); drawDetail(); };
+
+  document.getElementById('dActions').innerHTML = `
+    <button class="btn ghost" id="dEdit">✏️</button>
+    <button class="btn pri" id="dTimer">⏱ ${r.min}分 タイマー</button>
+    <button class="btn ghost danger" id="dDel">🗑</button>`;
+  document.getElementById('dEdit').onclick  = ()=>openForm(r);
+  document.getElementById('dDel').onclick   = ()=>delRecipe(r);
+  document.getElementById('dTimer').onclick = ()=>startTimer(r.min*60, r.name);
+}
+
+document.getElementById('dFav').onclick = ()=>{
+  current.fav = !current.fav; save(); drawDetail(); renderList();
+  toast(current.fav?'お気に入りに入れました':'お気に入りから外しました');
+};
+
+/* 分量の人数倍。「大さじ1.5」「小さじ1/2」のように数字が先頭でなくても効くよう、
+   文字列中の最初の数値だけを掛ける。「少々」「適量」はそのまま */
+function scaleAmount(a, m){
+  if(m===1) return a;
+  let done = false;
+  return String(a).replace(/(\d+(?:\.\d+)?)(?:\/(\d+))?/, (all, n, d)=>{
+    if(done) return all;
+    done = true;
+    const v = (parseFloat(n) / (d ? parseFloat(d) : 1)) * m;
+    return fmtNum(v);
+  });
+}
+const FRACS = {0.25:'1/4', 0.33:'1/3', 0.5:'1/2', 0.67:'2/3', 0.75:'3/4'};
+function fmtNum(v){
+  /* 「大さじ1と1/2」は読みやすいが、「112と1/2g」は読みにくい。
+     10以上の数はグラムやmlのことが多いので、分数にせず丸めてしまう */
+  if(v >= 50) return String(Math.round(v/5)*5);
+  if(v >= 10) return String(Math.round(v));
+  const int = Math.floor(v + 1e-9);
+  const fr  = Math.round((v - int) * 100) / 100;
+  if(fr === 0) return String(int);
+  const f = FRACS[fr];
+  if(f) return int ? int + 'と' + f : f;
+  return String(Math.round(v * 100) / 100);
+}
+
+function delRecipe(r){
+  if(!confirm(`「${r.name}」を消します。もとに戻せません。よろしいですか？`)) return;
+  data = data.filter(x=>x.id!==r.id);
+  removePhoto(r.id);
+  save(); closeSheet('detail'); renderList(); toast('消しました');
+}
+
+/* ---------- フォーム ---------- */
+function buildSelects(){
+  document.getElementById('fCat').innerHTML  = CATS.map(c=>`<option>${c}</option>`).join('');
+  document.getElementById('fMode').innerHTML = Object.keys(MODES)
+    .map(m=>`<option value="${m}">${m}（${MODES[m].jp}）</option>`).join('');
+  const ep = document.getElementById('fEmoji');
+  ep.innerHTML = EMOJIS.map(e=>`<button data-e="${e}">${e}</button>`).join('');
+  ep.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    ep.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+  });
+  document.getElementById('mModes').innerHTML = Object.keys(MODES).map(m=>`
+    <div class="modecard">
+      <div class="mn">【${m}】<span style="color:var(--sub);font-weight:400">／${MODES[m].jp}</span></div>
+      <div class="md">${MODES[m].note}</div>
+      <div class="mt">目安 ${MODES[m].time}</div>
+    </div>`).join('');
+}
+function pickedEmoji(){
+  const on = document.querySelector('#fEmoji button.on');
+  return on? on.dataset.e : '🍽';
+}
+function setEmoji(e){
+  document.querySelectorAll('#fEmoji button').forEach(b=>b.classList.toggle('on', b.dataset.e===e));
+}
+function syncModeHint(){
+  const m = MODES[document.getElementById('fMode').value];
+  document.getElementById('fModeHint').textContent = m ? m.note + '（目安 ' + m.time + '）' : '';
+}
+document.getElementById('fMode').onchange = function(){
+  const d = MODES[this.value];
+  const m = document.getElementById('fMin');
+  if(d && !m.value) m.value = d.min;
+  syncModeHint();
+};
+
+function openForm(r){
+  editingId = r? r.id : null;
+  document.getElementById('fTitle').textContent = r? 'レシピを直す' : 'レシピを追加';
+  document.getElementById('fName').value = r? r.name : '';
+  document.getElementById('fCat').value  = r? r.cat  : CATS[0];
+  document.getElementById('fMode').value = r? r.mode : 'POTAGE&PASTE';
+  document.getElementById('fMin').value  = r? r.min  : '';
+  document.getElementById('fPot').value  = r? (r.pot||'RSY-2') : 'RSY-2';
+  document.getElementById('fServ').value = r? r.serv : 3;
+  document.getElementById('fIng').value  = r? r.ing.map(i=>i.n+', '+i.a).join('\n') : '';
+  document.getElementById('fStep').value = r? r.steps.join('\n') : '';
+  document.getElementById('fMemo').value = r? (r.memo||'') : '';
+  setEmoji(r? r.emoji : '🥣');
+  syncModeHint();
+  document.getElementById('form').scrollTop = 0;
+  openSheet('form');
+}
+
+document.getElementById('fSave').onclick = ()=>{
+  const name = document.getElementById('fName').value.trim();
+  if(!name){ toast('レシピ名を入れてください'); return; }
+  const mode = document.getElementById('fMode').value;
+  const old  = editingId ? data.find(x=>x.id===editingId) : null;
+  const rec = {
+    id: editingId || 'r-'+Date.now(),
+    name,
+    emoji: pickedEmoji(),
+    cat:   document.getElementById('fCat').value,
+    mode,
+    min:   +document.getElementById('fMin').value || MODES[mode].min,
+    pot:   document.getElementById('fPot').value,
+    serv:  +document.getElementById('fServ').value || 3,
+    ing: document.getElementById('fIng').value.split('\n').filter(l=>l.trim()).map(l=>{
+      const p = l.split(/[,、]/);
+      return {n:(p[0]||'').trim(), a:(p.slice(1).join(',')||'').trim()};
+    }),
+    steps: document.getElementById('fStep').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    memo: document.getElementById('fMemo').value.trim(),
+    src:  old? old.src : '',
+    link: old? (old.link||'') : '',
+    fav:  old? old.fav : false,
+    seed: old? old.seed : false
+  };
+  if(editingId){
+    data[data.findIndex(x=>x.id===editingId)] = rec;
+    current = rec;
+  }else{
+    data.unshift(rec);
+  }
+  save(); closeSheet('form'); renderList();
+  if(editingId) drawDetail();
+  toast('保存しました');
+};
+
+/* ---------- タイマー ---------- */
+let tEnd=0, tLeft=0, tRun=false, tTick=null, tRing=false;
+const bar = document.getElementById('timerBar');
+
+/* タイマーバーが画面下を占める分を、他の固定要素に伝える。
+   これをしないと、レシピ下部のボタンとタイマーが重なって見えなくなる */
+function syncTimerSpace(){
+  const on = bar.classList.contains('on');
+  document.body.classList.toggle('timing', on);
+  document.documentElement.style.setProperty('--timerh', on ? bar.offsetHeight + 'px' : '0px');
+}
+addEventListener('resize', syncTimerSpace);
+addEventListener('orientationchange', ()=>setTimeout(syncTimerSpace, 200));
+
+function startTimer(sec, name){
+  tLeft = sec; tEnd = Date.now()+sec*1000; tRun = true; tRing = false;
+  bar.classList.add('on'); bar.classList.remove('ring');
+  document.getElementById('tName').textContent = name;
+  document.getElementById('tToggle').textContent = '一時停止';
+  syncTimerSpace();
+  primeAudio();
+  clearInterval(tTick);
+  paintTimer();
+  tTick = setInterval(paintTimer, 250);
+  toast('タイマー開始');
+}
+function paintTimer(){
+  if(tRun){ tLeft = Math.max(0, Math.round((tEnd-Date.now())/1000)); }
+  const m = String(Math.floor(tLeft/60)).padStart(2,'0');
+  const s = String(tLeft%60).padStart(2,'0');
+  document.getElementById('tNum').textContent = m+':'+s;
+  if(tRun && tLeft<=0 && !tRing){ ringAlarm(); }
+}
+function ringAlarm(){
+  tRing = true; tRun = false;
+  bar.classList.add('ring');
+  document.getElementById('tName').textContent = 'そろそろできあがり！';
+  syncTimerSpace();
+  beep(); setTimeout(beep,700); setTimeout(beep,1400);
+  if(navigator.vibrate) navigator.vibrate([300,150,300,150,300]);
+}
+document.getElementById('tToggle').onclick = ()=>{
+  if(tRing){ stopTimer(); return; }
+  tRun = !tRun;
+  if(tRun) tEnd = Date.now()+tLeft*1000;
+  document.getElementById('tToggle').textContent = tRun? '一時停止':'さいかい';
+};
+document.getElementById('tStop').onclick = stopTimer;
+function stopTimer(){
+  tRun=false; tRing=false; clearInterval(tTick);
+  bar.classList.remove('on','ring');
+  syncTimerSpace();
+}
+
+let ac=null;
+function primeAudio(){
+  try{
+    ac = ac || new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state==='suspended') ac.resume();
+  }catch(e){}
+}
+function beep(){
+  if(!ac) return;
+  try{
+    const o=ac.createOscillator(), g=ac.createGain();
+    o.type='sine'; o.frequency.value=880;
+    g.gain.setValueAtTime(.001, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.35, ac.currentTime+.02);
+    g.gain.exponentialRampToValueAtTime(.001, ac.currentTime+.5);
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime+.55);
+  }catch(e){}
+}
+// iOSは裏に回るとタイマーが止まるので、戻ったら時刻から計算し直す
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) paintTimer(); });
+
+/* ---------- バックアップ ---------- */
+document.getElementById('mExport').onclick = ()=>{
+  // 写真も一緒に書き出す（別キーに持っているので、ここで合流させる）
+  const out = data.map(r=>{
+    const p = getPhoto(r.id);
+    return p ? Object.assign({}, r, {photo:p}) : r;
+  });
+  const blob = new Blob([JSON.stringify(out,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const d = new Date(), p = n=>String(n).padStart(2,'0');
+  a.href = url;
+  a.download = `recolte-pot-recipes-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  toast('書き出しました');
+};
+document.getElementById('mImport').onclick = ()=>document.getElementById('mFile').click();
+document.getElementById('mFile').onchange = e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const rd = new FileReader();
+  rd.onload = ()=>{
+    try{
+      const arr = JSON.parse(rd.result);
+      if(!Array.isArray(arr)) throw 0;
+      if(!confirm(`${arr.length}件のレシピを読み込みます。同じIDのものは上書きされます。`)) return;
+      let lost = 0;
+      arr.forEach(r=>{
+        if(r.photo){                       // 写真は別キーに戻す
+          if(!setPhoto(r.id, r.photo)) lost++;
+          delete r.photo;
+        }
+        const i = data.findIndex(x=>x.id===r.id);
+        if(i>=0) data[i]=r; else data.push(r);
+      });
+      if(lost) alert(`レシピは読みこめましたが、写真${lost}枚は容量が足りず入りませんでした。`);
+      migrate(); save(); renderList(); closeSheet('menu'); toast('読み込みました');
+    }catch(err){ toast('このファイルは読み込めません'); }
+  };
+  rd.readAsText(f);
+  e.target.value='';
+};
+document.getElementById('mReset').onclick = ()=>{
+  if(!confirm('お手本レシピを入れ直します。自分で作ったレシピはそのまま残ります。')) return;
+  data = data.filter(r=>!r.seed);
+  seed(); renderList(); closeSheet('menu'); toast('入れ直しました');
+};
+
+/* ---------- 共通 ---------- */
+function openSheet(id){ document.getElementById(id).classList.add('open'); }
+function closeSheet(id){ document.getElementById(id).classList.remove('open'); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+let toastT=null;
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('on');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 1800);
+}
+
+document.getElementById('q').oninput = e=>{ query = e.target.value; renderList(); };
+document.getElementById('btnFav').onclick = function(){
+  favOnly = !favOnly;
+  this.textContent = favOnly?'★':'☆';
+  this.style.color = favOnly?'var(--gold)':'';
+  renderList();
+};
+
+/* ---------- 公式レシピ一覧 ----------
+   お手本レシピはすべて公式ページから来ているので、そこから一覧を作る */
+const OFFICIAL = SEED.filter(r=>r.link).map(r=>[r.name, r.link, r.pot]);
+function renderOfficial(){
+  const kw = document.getElementById('oq').value.trim().toLowerCase();
+  const hits = OFFICIAL.filter(o=>!kw || o[0].toLowerCase().includes(kw));
+  document.getElementById('oCount').textContent = OFFICIAL.length;
+  document.getElementById('mCount').textContent = OFFICIAL.length;
+  document.getElementById('oList').innerHTML = hits.length
+    ? hits.map(o=>`<a class="olink" href="${esc(o[1])}" target="_blank" rel="noopener noreferrer">
+         <span>📷</span><span>${esc(o[0])}</span>
+         ${o[2]==='RSY-3'?'<span class="pot">ラージ</span>':''}
+         <span class="go">ひらく ›</span></a>`).join('')
+    : '<div class="empty">みつかりませんでした</div>';
+}
+document.getElementById('oq').oninput = renderOfficial;
+document.getElementById('btnOfficial').onclick = ()=>{
+  renderOfficial();
+  document.getElementById('official').scrollTop = 0;
+  openSheet('official');
+};
+
+document.getElementById('btnMenu').onclick = ()=>openSheet('menu');
+document.getElementById('btnAdd').onclick  = ()=>openForm(null);
+
+/* 起動 */
+load(); buildSelects(); renderChips(); renderList(); renderOfficial();
+</script>
+</body>
+</html>
